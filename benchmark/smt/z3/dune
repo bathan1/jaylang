@@ -1,0 +1,4 @@
+(executable
+ (name bench_z3)
+ (libraries z3 unix smt overlays))
+
