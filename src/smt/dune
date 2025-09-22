@@ -8,8 +8,17 @@
   z3
   utils
   )
+ (modules :standard \ formula_2)
  (synopsis "SMT module for the Jaylang project")
  (inline_tests)
  (instrumentation (backend landmarks --auto))
  (instrumentation (backend bisect_ppx))
  (preprocess (pps ppx_compare ocaml-monadic)))
+
+(executable
+ (name formula_2)
+ (public_name jay.smt.formula_2)
+ (modules formula_2)
+ (libraries core preface z3 utils smt)
+ (preprocess (pps ppx_compare ocaml-monadic))
+)
