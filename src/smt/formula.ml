@@ -176,33 +176,3 @@ module Make_solver (X : SOLVABLE) = struct
     | e -> X.solve [ M.transform e ]
 end
 
-let rec to_string : type a k. (a, k) t -> string = function
-  | Const_int i -> Int.to_string i
-  | Const_bool b -> Bool.to_string b
-  | Key s ->
-      (match s with
-       | I uid -> Printf.sprintf "I%d" uid
-       | B uid -> Printf.sprintf "B%d" uid)
-  | Not e ->
-      Printf.sprintf "(not %s)" (to_string e)
-  | And es ->
-      let parts = List.map es ~f:to_string in
-      Printf.sprintf "(%s)" (String.concat ~sep:" ^ " parts)
-  | Binop (op, e1, e2) ->
-      let op_str =
-        match op with
-        | Binop.Equal -> "="
-        | Binop.Not_equal -> "!="
-        | Binop.Less_than -> "<"
-        | Binop.Less_than_eq -> "<="
-        | Binop.Greater_than -> ">"
-        | Binop.Greater_than_eq -> ">="
-        | Binop.Plus -> "+"
-        | Binop.Minus -> "-"
-        | Binop.Times -> "*"
-        | Binop.Divide -> "/"
-        | Binop.Modulus -> "mod"
-        | Binop.Or -> "or"
-      in
-      Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
-
