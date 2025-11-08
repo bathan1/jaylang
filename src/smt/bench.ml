@@ -17,8 +17,8 @@ let () =
             Binop (Equal, Key b, Const_int 1);
         ] in
         let bad_expr = Smt.Formula.And [
-            Binop (Equal, Key a, Const_int 1);
-            Not (Binop (Equal, Key a, Const_int 1))
+            Binop (Equal, Key a, Key b);
+            Not (Binop (Equal, Key a, Key b))
         ] in
         ignore (solve [expr]);
         ignore (solve [bad_expr]);
