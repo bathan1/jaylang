@@ -53,7 +53,8 @@ module EqualityTheory : EqTheory = struct
         let uf = create () in
         List.iter eqs ~f:(fun (x, y) -> union uf x y);
         let tbl = Hashtbl.create (module Int) in
-        Hashtbl.iter_keys uf.parent ~f:(fun x ->
+        let keys = Hashtbl.keys uf.parent in
+        List.iter keys ~f:(fun x ->
             Hashtbl.set tbl ~key:x ~data:(find uf x));
         Some tbl
 
@@ -104,8 +105,7 @@ module RangeTheory : IntTheory = struct
                 | Binop.Equal -> "="
                 | Binop.Not_equal -> "!="
             in
-            Printf.printf "  %d %s %d\n" x op_str c);
-        print_endline "-----"
+            Printf.printf "  %c %s %d\n-----\n" (Char.of_int_exn x) op_str c)
 
     let check constraints =
         let ranges = Hashtbl.create (module Int) in
@@ -190,22 +190,20 @@ let extract_constraints
             | _ -> acc)
 
 let model (model_pairs : ((bool, 'k) Formula.t * bool) list)
-  : (int, int) Hashtbl.t option =
-  let { eqs; ints } = extract_constraints model_pairs in
-  let normalized_ints = EqualityTheory.normalize ints eqs in
-  match RangeTheory.model normalized_ints with
-  | None -> None
-  | Some int_model ->
-      Option.iter (EqualityTheory.model eqs) ~f:(fun eq_model ->
-        Hashtbl.iteri eq_model ~f:(fun ~key:x ~data:root ->
-          match Hashtbl.find int_model root with
-          | Some v -> Hashtbl.set int_model ~key:x ~data:v
-          | None ->
-              (match Hashtbl.find int_model root with
-               | Some root_val -> Hashtbl.set int_model ~key:x ~data:root_val
-               | None -> Hashtbl.set int_model ~key:x ~data:0)));
-      Some int_model
+    : (int, int) Hashtbl.t option =
+    let { eqs; ints } = extract_constraints model_pairs in
+    let normalized_ints = EqualityTheory.normalize ints eqs in
+    match RangeTheory.model normalized_ints with
+    | None -> None
+    | Some int_model ->
+        Option.iter (EqualityTheory.model eqs) ~f:(fun eq_model ->
+            let pairs = Hashtbl.to_alist eq_model in
+            List.iter pairs ~f:(fun (x, root) ->
+                match Hashtbl.find int_model root with
+                | Some v -> Hashtbl.set int_model ~key:x ~data:v
+                | None -> Hashtbl.set int_model ~key:x ~data:0));
 
+        Some int_model
 
 let check (model_pairs : ((bool, 'k) Formula.t * bool) list) : bool =
     let { eqs; ints } = extract_constraints model_pairs in

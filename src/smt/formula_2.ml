@@ -21,7 +21,6 @@ let rec tseitin
     | Key _ 
         | Binop ((Equal | Less_than | Greater_than
         | Less_than_eq | Greater_than_eq), _, _) ->
-        (* atomic proposition — already has an ID *)
         let v = Core.Hashtbl.find_exn atom_table f in
         (v, cnf_acc)
 
@@ -204,11 +203,9 @@ let rec binop : type a b. (a * a * b) Smt.Binop.t -> (a, 'k) t -> (a, 'k) t -> (
         | e1, e2 -> Binop (Greater_than_eq, e1, e2)
         end
 
-open Smt.Formula
-open Core
-open Smt.Sat
-
-let rec to_string : type a k. (a, k) t -> string = function
+let rec to_string : type a k. (a, k) t -> string = fun expr ->
+    let open Core in
+    match expr with
     | Const_int i -> Int.to_string i
     | Const_bool b -> Bool.to_string b
     | Key s ->
@@ -242,6 +239,19 @@ let rec to_string : type a k. (a, k) t -> string = function
         Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
 
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
+    let open Core in
+    let open Smt.Formula in
+    let run_id =
+        let open Core in
+        let time_str = Time_float.to_string_abs ~zone:Time_float.Zone.utc (Time_float.now ()) in
+        let pid = Caml_unix.getpid () in
+        sprintf "%s-pid%d" time_str (pid)
+    in
+    Printf.printf "\n\027[1;34m======= SMT Solve Run %s =======\027[0m\n" run_id;
+    List.iteri exprs ~f:(fun i e ->
+        Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
+    print_endline "-----------------------------------";
+
     let add_bool_binop acc (op : _ Smt.Binop.t) e1 e2 =
         let f' = Binop (op, e1, e2) in
         f' :: acc
@@ -258,11 +268,13 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
         | Binop (Less_than, e1, e2) -> add_bool_binop acc Less_than e1 e2
         | Binop (Greater_than, e1, e2) -> add_bool_binop acc Greater_than e1 e2
         | Binop (Less_than_eq, e1, e2) -> add_bool_binop acc Less_than_eq e1 e2
-        | Binop (Greater_than_eq, e1, e2) -> add_bool_binop acc Greater_than_eq e1 e2
+        | Binop (Greater_than_eq, e1, e2) ->
+            add_bool_binop acc Greater_than_eq e1 e2
         | Binop (_, e1, e2) ->
             let acc = collect_atoms acc e1 in
             collect_atoms acc e2
     in
+
     let atoms =
         exprs
         |> List.concat_map ~f:(collect_atoms [])
@@ -277,45 +289,245 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
         Hashtbl.set id_table ~key:!counter ~data:atom;
         incr counter);
 
-    Printf.printf "Atom table:\n";
+    Printf.printf "\n\027[1;33mAtom table:\027[0m\n";
     Hashtbl.iteri atom_table ~f:(fun ~key:atom ~data:id ->
-        Printf.printf "  %d <-> %s\n" id (to_string atom));
-    print_endline "-----\n";
+        Printf.printf "  %3d <-> %s\n" id (to_string atom));
+    print_endline "-----------------------------------";
 
-    let fresh () = let v = !counter in incr counter; v in
+    let fresh () =
+        let v = !counter in
+        incr counter;
+        v
+    in
 
     let cnf, top_vars =
         List.fold_left exprs ~init:([], []) ~f:(fun (cnf_acc, tops) e ->
-            let (v, cnf') = tseitin e fresh cnf_acc atom_table in
+            let v, cnf' = tseitin e fresh cnf_acc atom_table in
             (cnf', v :: tops))
     in
 
     let top_clauses = [ List.map top_vars ~f:(fun v -> Pos v) ] in
     let cnf = top_clauses @ cnf in
+    Printf.printf "CNF generated: %d clauses, %d vars\n"
+        (List.length cnf) !counter;
 
     match dpll equal [] cnf with
-    | None -> Smt.Solution.Unsat
+    | None ->
+        print_endline "\027[1;31mResult: UNSAT\027[0m";
+        print_endline "-----------------------------------\n";
+        Smt.Solution.Unsat
     | Some assignment ->
-    (* reverse map *)
-    let model_pairs =
-      List.filter_map assignment ~f:(fun (id, value) ->
-        match Hashtbl.find id_table id with
-        | Some atom -> Some (atom, value)
-        | None -> None)
-    in
-    if not (Smt.Theory.check model_pairs) then (
-      print_endline "Theory conflict — UNSAT.";
-      Smt.Solution.Unsat
-    ) else (
-      match Smt.Theory.model model_pairs with
-      | None ->
-          print_endline "Theory found no valid model.";
-          Smt.Solution.Unsat
-      | Some int_model ->
-          print_endline "Combined theory model:";
-          Hashtbl.iteri int_model ~f:(fun ~key ~data ->
-            Printf.printf "  %c = %d\n" (Char.of_int_exn key) data);
+        print_endline "\027[1;32mResult: SAT\027[0m";
+        Printf.printf "Raw assignment (%d vars):\n" (List.length assignment);
+        List.iter assignment ~f:(fun (id, value) ->
+            Printf.printf "  v%-3d = %B\n" id value);
+        print_endline "-----------------------------------";
 
-          let model = model_of_pairs model_pairs in
-          Smt.Solution.Sat model
-    )
+        let model_pairs =
+            List.filter_map assignment ~f:(fun (id, value) ->
+                Option.map (Hashtbl.find id_table id) ~f:(fun atom -> (atom, value)))
+        in
+
+        if not (Smt.Theory.check model_pairs) then (
+            print_endline
+                "\027[1;31mTheory conflict — UNSAT after theory check.\027[0m";
+            print_endline "-----------------------------------\n";
+            Smt.Solution.Unsat)
+        else
+            match Smt.Theory.model model_pairs with
+            | None ->
+                print_endline "\027[1;31mTheory found no valid model.\027[0m";
+                print_endline "-----------------------------------\n";
+                Smt.Solution.Unsat
+            | Some int_model ->
+                print_endline "\027[1;36mCombined theory model:\027[0m";
+                Hashtbl.iteri int_model ~f:(fun ~key ~data ->
+                    Printf.printf "  %c = %d\n" (Char.of_int_exn key) data);
+                print_endline "-----------------------------------\n";
+                let model = model_of_pairs model_pairs in
+                Smt.Solution.Sat model
+
+open Core
+
+module AsciiSymbol = Smt.Symbol.Make(struct
+    type t = string
+    let uid (s : string) =
+        String.fold s ~init:0 ~f:(fun acc c -> acc + Char.to_int c)
+end)
+
+let trim = String.strip
+
+let tokenize (s : string) : string list =
+    let buf = Buffer.create 16 in
+    let toks = ref [] in
+    let push () =
+        if Buffer.length buf > 0 then (
+            toks := Buffer.contents buf :: !toks;
+            Buffer.clear buf
+        )
+    in
+    String.iter s ~f:(fun c ->
+        match c with
+        | '(' | ')' | '^' ->
+            push ();
+            toks := String.of_char c :: !toks
+        | ' ' | '\t' -> push ()
+        | _ -> Buffer.add_char buf c);
+    push ();
+    List.rev !toks
+;;
+
+
+let parse_value_int (v : string) : (int, 'k) Smt.Formula.t =
+    let open Smt.Formula in
+    match Int.of_string_opt v with
+    | Some i -> Const_int i
+    | None -> Key (AsciiSymbol.make_int v)
+
+
+let parse_value_bool (v : string) : (bool, 'k) t =
+    let open Smt.Formula in
+    match String.lowercase v with
+    | "true" -> Const_bool true
+    | "false" -> Const_bool false
+    | _ -> Key (AsciiSymbol.make_bool v)
+;;
+
+let parse_value_any
+    (v1 : string)
+    (v2 : string)
+    : ('a, 'k) t * ('a, 'k) t
+    =
+    let open Smt.Formula in
+    match
+    (String.for_all v1 ~f:Char.is_digit, String.for_all v2 ~f:Char.is_digit)
+    with
+    | true, true -> Const_int (Int.of_string v1), Const_int (Int.of_string v2)
+    | false, false -> Key (AsciiSymbol.make_int v1), Key (AsciiSymbol.make_int v2)
+    | _ -> failwith "type mismatch in = or <> comparison"
+;;
+
+let line_error count msg = sprintf "Line %d: %s" count msg
+
+let rec parse_until_closing count toks depth acc =
+    match toks with
+    | [] ->
+        failwith (line_error count "unclosed parenthesis")
+    | ")" :: rest when depth = 0 ->
+        (List.rev acc, rest)
+    | ")" :: rest ->
+        parse_until_closing count rest (depth - 1) (")" :: acc)
+    | "(" :: rest ->
+        parse_until_closing count rest (depth + 1) ("(" :: acc)
+    | tok :: rest ->
+        parse_until_closing count rest depth (tok :: acc)
+
+let rec parse_arithmetic toks count : (int, 'k) Smt.Formula.t * string list =
+    let open Smt.Formula in
+    match toks with
+    | "(" :: rest ->
+        let inner_toks, rest_after = parse_until_closing count rest 0 [] in
+        let e, _ = parse_arithmetic inner_toks count in
+        parse_arith_tail e rest_after count
+
+    | "-" :: t :: rest when Option.is_some (Int.of_string_opt t) ->
+        (Const_int (- Int.of_string t), rest)
+
+    | t :: rest when Option.is_some (Int.of_string_opt t) ->
+        parse_arith_tail (Const_int (Int.of_string t)) rest count
+
+    | t :: rest ->
+        parse_arith_tail (Key (AsciiSymbol.make_int t)) rest count
+
+    | [] -> failwith (line_error count "unexpected end in arithmetic")
+
+and parse_arith_tail lhs toks count : (int, 'k) Smt.Formula.t * string list =
+    let open Smt.Formula in
+    let open Smt.Binop in
+    match toks with
+    | op :: rest when List.mem ["+"; "-"; "*"; "/"; "%"] op ~equal:String.equal ->
+        let rhs, rest' = parse_arithmetic rest count in
+        let bop =
+            match op with
+            | "+" -> Plus | "-" -> Minus | "*" -> Times
+            | "/" -> Divide | "%" -> Modulus | _ -> failwith "unreachable"
+        in
+        parse_arith_tail (Binop (bop, lhs, rhs)) rest' count
+    | _ -> (lhs, toks)
+
+let parse_comparison toks count : (bool, 'k) t * string list =
+    let open Smt.Formula in
+    let lhs, rest = parse_arithmetic toks count in
+    match rest with
+    | op :: rest' when List.mem ["="; "!="; ">="; ">"; "<="; "<"] op ~equal:String.equal ->
+        let rhs, rest'' = parse_arithmetic rest' count in
+        let bop =
+            match op with
+            | "=" -> Binop (Equal, lhs, rhs)
+            | "!=" -> Binop (Not_equal, lhs, rhs)
+            | ">=" -> Binop (Greater_than_eq, lhs, rhs) 
+            | ">" -> Binop (Greater_than, lhs, rhs)
+            | "<=" -> Binop (Less_than_eq, lhs, rhs)
+            | "<" -> Binop (Less_than, lhs, rhs)
+            | _ -> failwith "unreachable"
+        in (bop, rest'')
+    | ls -> sprintf "expected comparison operator near %s" (List.to_string ls ~f:(String.to_string))
+        |> line_error count
+        |> failwith
+;;
+
+type ('a, 'k) expr =
+    | BoolExpr of (bool, 'k) t
+    | IntExpr  of (int, 'k) t
+
+let rec parse_subexpr count toks : ('a, 'k) expr * string list =
+    match toks with
+    | "not" :: rest ->
+        let e, rest' = parse_subexpr count rest in
+        begin match e with
+            | BoolExpr b -> (BoolExpr (Not b), rest')
+            | IntExpr _ -> "cannot apply 'not' to arithmetic" |> line_error count |> failwith
+            end
+    | "(" :: rest ->
+        let inner_toks, rest_after = parse_until_closing count rest 0 [] in
+        let e, _ = parse_subexpr count inner_toks in
+        begin match rest_after with
+            | op :: _ when List.mem ["="; "!="; ">="; ">"; "<="; "<"] op ~equal:String.equal ->
+                let combined = inner_toks @ rest_after in
+                let e', rest'' = parse_comparison combined count in
+                (BoolExpr e', rest'')
+            | _ -> (e, rest_after)
+            end
+    | [] ->
+        failwith (line_error count "unexpected end, missing closing parenthesis")
+    | _ :: op :: _ when List.mem ["="; "!="; ">="; ">"; "<="; "<"] op ~equal:String.equal ->
+        let e, rest' = parse_comparison toks count in
+        (BoolExpr e, rest')
+    | _ :: op :: _ when List.mem ["+"; "-"; "*"; "/"; "%"] op ~equal:String.equal ->
+        let e, rest' = parse_arithmetic toks count in
+        (IntExpr e, rest')
+
+    | _ -> (BoolExpr (Key (AsciiSymbol.make_bool (List.hd_exn toks))), List.tl_exn toks)
+
+let parse_formula count toks : (bool, 'k) Smt.Formula.t * string list =
+    match parse_subexpr count toks with
+    | BoolExpr b, rest -> (b, rest)
+    | IntExpr _, _ -> "arithmetic cannot appear at top level" |> line_error count |> failwith
+
+let of_string : type k. string -> (bool, k) Smt.Formula.t list =
+    fun s ->
+    let count = ref 0 in
+    s
+    |> String.split_lines
+    |> List.filter_map ~f:(fun line ->
+        count := !count + 1;
+        line
+        |> String.strip
+        |> function 
+        | ln when String.is_empty ln -> None 
+        | ln -> Some (
+            ln 
+            |> tokenize 
+            |> parse_formula !count
+            |> fst 
+        ))
