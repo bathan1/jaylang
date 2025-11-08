@@ -241,7 +241,7 @@ let rec to_string : type a k. (a, k) t -> string = fun expr ->
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     let open Core in
     let open Smt.Formula in
-    Printf.printf "\n\027[1;34m======= SMT solve() run =======\027[0m\n";
+    Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n";
     List.iteri exprs ~f:(fun i e ->
         Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
     print_endline "-----------------------------------";
