@@ -241,13 +241,7 @@ let rec to_string : type a k. (a, k) t -> string = fun expr ->
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     let open Core in
     let open Smt.Formula in
-    let run_id =
-        let open Core in
-        let time_str = Time_float.to_string_abs ~zone:Time_float.Zone.utc (Time_float.now ()) in
-        let pid = Caml_unix.getpid () in
-        sprintf "%s-pid%d" time_str (pid)
-    in
-    Printf.printf "\n\027[1;34m======= SMT Solve Run %s =======\027[0m\n" run_id;
+    Printf.printf "\n\027[1;34m======= SMT solve() run =======\027[0m\n";
     List.iteri exprs ~f:(fun i e ->
         Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
     print_endline "-----------------------------------";
@@ -289,10 +283,9 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
         Hashtbl.set id_table ~key:!counter ~data:atom;
         incr counter);
 
-    Printf.printf "\n\027[1;33mAtom table:\027[0m\n";
+    Printf.printf "\027[1;33mAtom table:\027[0m\n";
     Hashtbl.iteri atom_table ~f:(fun ~key:atom ~data:id ->
         Printf.printf "  %3d <-> %s\n" id (to_string atom));
-    print_endline "-----------------------------------";
 
     let fresh () =
         let v = !counter in
@@ -308,8 +301,10 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
 
     let top_clauses = [ List.map top_vars ~f:(fun v -> Pos v) ] in
     let cnf = top_clauses @ cnf in
+
     Printf.printf "CNF generated: %d clauses, %d vars\n"
         (List.length cnf) !counter;
+    print_endline "-----------------------------------";
 
     match dpll equal [] cnf with
     | None ->
