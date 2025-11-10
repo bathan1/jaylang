@@ -1,6 +1,7 @@
 open Core
 
-module type EqTheory = sig
+(** Handles symbolic Equality of Uninterpreted Functions. *)
+module type EUFTheory = sig
     type t = (int * int) list
 
     val normalize : (int * 'a * 'b) list -> t -> (int * 'a * 'b) list
@@ -12,8 +13,8 @@ module type EqTheory = sig
     val print_constraints : t -> unit
 end
 
-
-module type IntTheory = sig
+(** Handles Linear Integer Arithmetric expressions. *)
+module type LIATheory = sig
     val check :
         (int * Binop.iib Binop.t * int) list -> bool
     val model :
@@ -22,7 +23,7 @@ module type IntTheory = sig
         (int * Binop.iib Binop.t * int) list -> unit
 end
 
-module EqualityTheory : EqTheory = struct
+module EqualityTheory : EUFTheory = struct
     type t = (int * int) list
     type uf = { parent : (int, int) Hashtbl.t }
 
@@ -70,7 +71,7 @@ module EqualityTheory : EqTheory = struct
         print_endline "-----"
 end
 
-module RangeTheory : IntTheory = struct
+module RangeTheory : LIATheory = struct
     type range = {
         mutable lower : int option;
         mutable upper : int option;
