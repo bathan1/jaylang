@@ -196,43 +196,43 @@ let rec binop : type a b. (a * a * b) Smt.Binop.t -> (a, 'k) t -> (a, 'k) t -> (
         | e1, e2 -> Binop (Greater_than_eq, e1, e2)
         end
 
-
+let rec collect_atoms : type a k. (bool, k) t list -> (a, k) t -> (bool, k) t list =
+    let open Core in
+    fun acc f ->
+    match f with
+    | Const_bool _ | Const_int _ -> acc
+    | Key (B _) -> f :: acc
+    | Key (I _) -> acc
+    | Not e -> collect_atoms acc e
+    | And es -> List.fold_left es ~init:acc ~f:collect_atoms
+    | Binop (Equal, e1, e2) -> Binop (Equal, e1, e2) :: acc
+    | Binop (Less_than, e1, e2) -> Binop (Less_than, e1, e2) :: acc
+    | Binop (Greater_than, e1, e2) -> Binop (Greater_than, e1, e2) :: acc
+    | Binop (Less_than_eq, e1, e2) -> Binop (Less_than_eq, e1, e2) :: acc
+    | Binop (Greater_than_eq, e1, e2) ->
+        Binop (Greater_than_eq, e1, e2) :: acc
+    | Binop (_, e1, e2) ->
+        let acc = collect_atoms acc e1 in
+        collect_atoms acc e2
+;;
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     let open Core in
     let open Smt.Formula in
+
+    let atom_table = Hashtbl.Poly.create ()
+    and id_table = Hashtbl.create (module Int)
+    and counter = ref 0 in
 
     Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n";
     List.iteri exprs ~f:(fun i e ->
         Printf.printf "Expr %d: %s\n" (i + 1) (Smt.Formula.to_string e));
     print_endline "-----------------------------------";
 
-    let rec collect_atoms : type a k. (bool, k) t list -> (a, k) t -> (bool, k) t list =
-        fun acc f ->
-        match f with
-        | Const_bool _ | Const_int _ -> acc
-        | Key (B _) -> f :: acc
-        | Key (I _) -> acc
-        | Not e -> collect_atoms acc e
-        | And es -> List.fold_left es ~init:acc ~f:collect_atoms
-        | Binop (Equal, e1, e2) -> Binop (Equal, e1, e2) :: acc
-        | Binop (Less_than, e1, e2) -> Binop (Less_than, e1, e2) :: acc
-        | Binop (Greater_than, e1, e2) -> Binop (Greater_than, e1, e2) :: acc
-        | Binop (Less_than_eq, e1, e2) -> Binop (Less_than_eq, e1, e2) :: acc
-        | Binop (Greater_than_eq, e1, e2) ->
-            Binop (Greater_than_eq, e1, e2) :: acc
-        | Binop (_, e1, e2) ->
-            let acc = collect_atoms acc e1 in
-            collect_atoms acc e2
-    in
-
     let atoms =
         exprs
         |> List.concat_map ~f:(collect_atoms [])
         |> List.dedup_and_sort ~compare:Poly.compare
     in
-    let atom_table = Hashtbl.Poly.create ()
-    and id_table = Hashtbl.create (module Int)
-    and counter = ref 0 in
 
     List.iter atoms ~f:(fun atom ->
         Hashtbl.set atom_table ~key:atom ~data:!counter;
@@ -270,8 +270,6 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
 
     Printf.printf "CNF generated: %d clauses, %d vars\n"
         (List.length cnf) !counter;
-    print_endline "-----------------------------------";
-
     Printf.printf "CNF:\n";
     List.iteri cnf ~f:(fun i clause ->
         Printf.printf "  %d: %s\n" i
@@ -279,13 +277,15 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
                 (List.map clause ~f:(function
                     | Pos x -> Printf.sprintf "v%d" x
                     | Neg x -> Printf.sprintf "¬v%d" x))));
+    print_endline "-----------------------------------";
+
     match dpll equal [] cnf with
     | None ->
-        print_endline "\027[1;31mResult: UNSAT\027[0m";
+        print_endline "\027[1;31mSAT Result: UNSAT\027[0m";
         print_endline "-----------------------------------\n";
         Smt.Solution.Unsat
     | Some assignment ->
-        print_endline "\027[1;32mResult: SAT\027[0m";
+        print_endline "\027[1;32mSAT Result: SAT\027[0m";
         Printf.printf "Raw assignment (%d vars):\n" (List.length assignment);
         List.iter assignment ~f:(fun (id, value) ->
             Printf.printf "  v%-3d = %B\n" id value);
@@ -317,23 +317,22 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
             | Some int_model ->
                 let constraints = Smt.Theory.extract_constraints model_pairs in
                 Option.iter (Smt.Theory.EUF.model { eqs = constraints.eqs; neqs = constraints.neqs; }) ~f:(fun eq_model ->
-                Hashtbl.iteri eq_model ~f:(fun ~key:x ~data:root ->
-                    match Hashtbl.find int_model root with
-                    | Some v -> Hashtbl.set int_model ~key:x ~data:v
-                    | None ->
-                        (match Hashtbl.find int_model x with
-                        | Some v -> Hashtbl.set int_model ~key:root ~data:v
-                        | None -> Hashtbl.set int_model ~key:x ~data:0)));
-                
+                    Hashtbl.iteri eq_model ~f:(fun ~key:x ~data:root ->
+                        match Hashtbl.find int_model root with
+                        | Some v -> Hashtbl.set int_model ~key:x ~data:v
+                        | None ->
+                            (match Hashtbl.find int_model x with
+                                | Some v -> Hashtbl.set int_model ~key:root ~data:v
+                                | None -> Hashtbl.set int_model ~key:x ~data:0)));
+
                 print_endline "\027[1;36mCombined theory model:\027[0m";
                 Hashtbl.iteri int_model ~f:(fun ~key ~data ->
-                if key >= 97 && key <= 122 then
-                    Printf.printf "  %c = %d\n" (Char.of_int_exn key) data);
+                    if key >= 97 && key <= 122 then
+                        Printf.printf "  %c = %d\n" (Char.of_int_exn key) data);
                 print_endline "-----------------------------------\n";
 
                 let model = model_of_pairs model_pairs in
                 Smt.Solution.Sat model
-
 
 open Core
 
