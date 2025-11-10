@@ -3,75 +3,68 @@ open Smt.Sat
 (** Use same type as Smt.Formula.t *)
 type ('a, 'k) t = ('a, 'k) Smt.Formula.t
 
-let rec tseitin
-    (f : ('a, 'k) t)
-    (fresh : unit -> int)
-    (cnf_acc : int Smt.Sat.cnf)
+let rec tseitin (f : ('a, 'k) Smt.Formula.t)
+    (fresh : ('a, 'k) t -> int)
+    (cnf_acc : int cnf)
     (atom_table : (('a, 'k) t, int) Core.Hashtbl.t)
-    : int * int Smt.Sat.cnf =
+    : int * int cnf =
+    let open Core in
     match f with
     | Const_bool true ->
-        let v = fresh () in
+        let v = fresh f in
         (v, [ [Pos v] ] @ cnf_acc)
 
     | Const_bool false ->
-        let v = fresh () in
+        let v = fresh f in
         (v, [ [Neg v] ] @ cnf_acc)
 
     | Key _ 
-        | Binop ((Equal | Less_than | Greater_than
-        | Less_than_eq | Greater_than_eq), _, _) ->
-        let v = Core.Hashtbl.find_exn atom_table f in
+        | Binop ((Equal | Not_equal | Less_than | Less_than_eq
+        | Greater_than | Greater_than_eq), _, _) ->
+        let v =
+            match Hashtbl.find atom_table f with
+            | Some id -> id
+            | None ->
+                let id = fresh f in
+                Hashtbl.set atom_table ~key:f ~data:id;
+                id
+        in
         (v, cnf_acc)
 
     | Not e ->
-        let (v_e, cnf_acc) = tseitin e fresh cnf_acc atom_table in
-        let v = fresh () in
+        let v_e, cnf_acc = tseitin e fresh cnf_acc atom_table in
+        let v = fresh f in
+        let new_clauses = [
+            [Neg v; Neg v_e];
+            [Pos v; Pos v_e];
+        ] in
+        (v, new_clauses @ cnf_acc)
+
+    | And es ->
+        let sub_vars, cnf_acc =
+            List.fold_right es ~init:([], cnf_acc)
+                ~f:(fun e (vs, acc) ->
+                    let v_e, acc' = tseitin e fresh acc atom_table in
+                    (v_e :: vs, acc'))
+        in
+        let v = fresh f in
         let new_clauses =
-            [ [Neg v; Neg v_e];
-                [Pos v; Pos v_e] ]
+            List.map sub_vars ~f:(fun v_e -> [Neg v; Pos v_e])
+            @
+            [List.map sub_vars ~f:(fun v_e -> Neg v_e) @ [Pos v]]
         in
         (v, new_clauses @ cnf_acc)
 
-    | And [e1; e2] ->
-        let (v1, cnf1) = tseitin e1 fresh cnf_acc atom_table in
-        let (v2, cnf2) = tseitin e2 fresh cnf1 atom_table in
-        let v = fresh () in
-        let new_clauses =
-            [ [Neg v; Pos v1];
-                [Neg v; Pos v2];
-                [Neg v1; Neg v2; Pos v] ]
-        in
-        (v, new_clauses @ cnf2)
-
     | Binop (Or, e1, e2) ->
-        let (v1, cnf1) = tseitin e1 fresh cnf_acc atom_table in
-        let (v2, cnf2) = tseitin e2 fresh cnf1 atom_table in
-        let v = fresh () in
-        let new_clauses =
-            [ [Neg v1; Pos v];
-                [Neg v2; Pos v];
-                [Neg v; Pos v1; Pos v2] ]
-        in
-        (v, new_clauses @ cnf2)
-
-    | And es when List.length es > 2 ->
-        let v_list, cnf' =
-            Core.List.fold_left es ~init:([], cnf_acc)
-                ~f:(fun (acc_vars, acc_cnf) e ->
-                    let (v_e, acc_cnf') = tseitin e fresh acc_cnf atom_table in
-                    (v_e :: acc_vars, acc_cnf'))
-        in
-        let v = fresh () in
-        let new_clauses =
-            (Core.List.map v_list ~f:(fun vi -> [Neg v; Pos vi]))
-            @ [ (Core.List.map v_list ~f:(fun vi -> Neg vi)) @ [Pos v] ]
-        in
-        (v, new_clauses @ cnf')
-
-    | _ ->
-        let v = fresh () in
-        (v, cnf_acc)
+        let v1, cnf_acc = tseitin e1 fresh cnf_acc atom_table in
+        let v2, cnf_acc = tseitin e2 fresh cnf_acc atom_table in
+        let v = fresh f in
+        let new_clauses = [
+            [Neg v; Pos v1; Pos v2];
+            [Neg v1; Pos v];
+            [Neg v2; Pos v];
+        ] in
+        (v, new_clauses @ cnf_acc)
 
 let model_of_pairs
     (pairs : ((bool, 'k) t * bool) list)
@@ -203,40 +196,6 @@ let rec binop : type a b. (a * a * b) Smt.Binop.t -> (a, 'k) t -> (a, 'k) t -> (
         | e1, e2 -> Binop (Greater_than_eq, e1, e2)
         end
 
-let rec to_string : type a k. (a, k) t -> string = fun expr ->
-    let open Core in
-    match expr with
-    | Const_int i -> Int.to_string i
-    | Const_bool b -> Bool.to_string b
-    | Key s ->
-        (match s with
-            | I uid ->
-                Printf.sprintf "%c" (Char.of_int_exn uid)
-            | B uid ->
-                Printf.sprintf "%c" (Char.of_int_exn uid))
-
-    | Not e ->
-        Printf.sprintf "(not %s)" (to_string e)
-    | And es ->
-        let parts = List.map es ~f:to_string in
-        Printf.sprintf "(%s)" (String.concat ~sep:" ^ " parts)
-    | Binop (op, e1, e2) ->
-        let op_str =
-            match op with
-            | Equal -> "="
-            | Not_equal -> "!="
-            | Less_than -> "<"
-            | Less_than_eq -> "<="
-            | Greater_than -> ">"
-            | Greater_than_eq -> ">="
-            | Plus -> "+"
-            | Minus -> "-"
-            | Times -> "*"
-            | Divide -> "/"
-            | Modulus -> "mod"
-            | Or -> "or"
-        in
-        Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
 
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     let open Core in
@@ -244,7 +203,7 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
 
     Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n";
     List.iteri exprs ~f:(fun i e ->
-        Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
+        Printf.printf "Expr %d: %s\n" (i + 1) (Smt.Formula.to_string e));
     print_endline "-----------------------------------";
 
     let rec collect_atoms : type a k. (bool, k) t list -> (a, k) t -> (bool, k) t list =
@@ -284,9 +243,10 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     Hashtbl.iteri atom_table ~f:(fun ~key:atom ~data:id ->
         Printf.printf "  %3d <-> %s\n" id (to_string atom));
 
-    let fresh () =
+    let fresh data =
         let v = !counter in
         incr counter;
+        Hashtbl.set id_table ~key:v ~data;
         v
     in
 
@@ -296,13 +256,29 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
             (cnf', v :: tops))
     in
 
-    let top_clauses = [ List.map top_vars ~f:(fun v -> Pos v) ] in
+    let is_neg f =
+        match f with
+        | Not _ -> true
+        | _ -> false
+    in
+
+    let top_clauses =
+        List.map2_exn exprs top_vars ~f:(fun e v ->
+            if is_neg e then [Neg v] else [Pos v])
+    in
     let cnf = top_clauses @ cnf in
 
     Printf.printf "CNF generated: %d clauses, %d vars\n"
         (List.length cnf) !counter;
     print_endline "-----------------------------------";
 
+    Printf.printf "CNF:\n";
+    List.iteri cnf ~f:(fun i clause ->
+        Printf.printf "  %d: %s\n" i
+            (String.concat ~sep:" ∨ "
+                (List.map clause ~f:(function
+                    | Pos x -> Printf.sprintf "v%d" x
+                    | Neg x -> Printf.sprintf "¬v%d" x))));
     match dpll equal [] cnf with
     | None ->
         print_endline "\027[1;31mResult: UNSAT\027[0m";
@@ -315,9 +291,16 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
             Printf.printf "  v%-3d = %B\n" id value);
         print_endline "-----------------------------------";
 
+        Printf.printf "ID table:\n";
+        Hashtbl.iteri id_table ~f:(fun ~key ~data ->
+            if Hashtbl.mem atom_table data then
+                Printf.printf "  %d -> %s\n" key (to_string data));
+
         let model_pairs =
             List.filter_map assignment ~f:(fun (id, value) ->
-                Option.map (Hashtbl.find id_table id) ~f:(fun atom -> (atom, value)))
+                Option.map (Hashtbl.find id_table id) ~f:(fun atom ->
+                    (atom, value)
+                ))
         in
 
         if not (Smt.Theory.check model_pairs) then (
@@ -332,12 +315,25 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
                 print_endline "-----------------------------------\n";
                 Smt.Solution.Unsat
             | Some int_model ->
+                let constraints = Smt.Theory.extract_constraints model_pairs in
+                Option.iter (Smt.Theory.EUF.model { eqs = constraints.eqs; neqs = constraints.neqs; }) ~f:(fun eq_model ->
+                Hashtbl.iteri eq_model ~f:(fun ~key:x ~data:root ->
+                    match Hashtbl.find int_model root with
+                    | Some v -> Hashtbl.set int_model ~key:x ~data:v
+                    | None ->
+                        (match Hashtbl.find int_model x with
+                        | Some v -> Hashtbl.set int_model ~key:root ~data:v
+                        | None -> Hashtbl.set int_model ~key:x ~data:0)));
+                
                 print_endline "\027[1;36mCombined theory model:\027[0m";
                 Hashtbl.iteri int_model ~f:(fun ~key ~data ->
+                if key >= 97 && key <= 122 then
                     Printf.printf "  %c = %d\n" (Char.of_int_exn key) data);
                 print_endline "-----------------------------------\n";
+
                 let model = model_of_pairs model_pairs in
                 Smt.Solution.Sat model
+
 
 open Core
 

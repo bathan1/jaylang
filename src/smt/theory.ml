@@ -1,8 +1,11 @@
 open Core
 
 (** Handles symbolic Equality of Uninterpreted Functions. *)
-module type EUFTheory = sig
-    type t = (int * int) list
+module type EUF = sig
+    type t = {
+        eqs : (int * int) list;
+        neqs : (int * int) list;
+    }
 
     val normalize : (int * 'a * 'b) list -> t -> (int * 'a * 'b) list
 
@@ -14,7 +17,7 @@ module type EUFTheory = sig
 end
 
 (** Handles Linear Integer Arithmetric expressions. *)
-module type LIATheory = sig
+module type LIA = sig
     val check :
         (int * Binop.iib Binop.t * int) list -> bool
     val model :
@@ -23,8 +26,8 @@ module type LIATheory = sig
         (int * Binop.iib Binop.t * int) list -> unit
 end
 
-module EqualityTheory : EUFTheory = struct
-    type t = (int * int) list
+module EUF : EUF = struct
+    type t = { eqs: (int * int) list; neqs: (int * int) list; }
     type uf = { parent : (int, int) Hashtbl.t }
 
     let create () = { parent = Hashtbl.create (module Int) }
@@ -42,36 +45,67 @@ module EqualityTheory : EUFTheory = struct
         let rx, ry = find uf x, find uf y in
         if rx <> ry then Hashtbl.set uf.parent ~key:ry ~data:rx
 
-    let normalize constraints eqs =
+    let normalize constraints (t : t) =
         let uf = create () in
-        List.iter eqs ~f:(fun (x, y) -> union uf x y);
-        List.map constraints ~f:(fun (x, op, c) ->
-            (find uf x, op, c))
+        List.iter t.eqs ~f:(fun (x, y) -> union uf x y);
+        List.map constraints ~f:(fun (x, op, c) -> (find uf x, op, c))
 
-    let check (_eqs : t) = true
+    let check (t : t) =
+        let parents = create () in
+        List.iter t.eqs ~f:(fun (x, y) -> union parents x y);
+        not (List.exists t.neqs ~f:(fun (x, y) -> find parents x = find parents y))
 
-    let model (eqs : t) : (int, int) Hashtbl.t option =
+    let model (t : t) : (int, int) Hashtbl.t option =
         let uf = create () in
-        List.iter eqs ~f:(fun (x, y) -> union uf x y);
-        let tbl = Hashtbl.create (module Int) in
-        let keys = Hashtbl.keys uf.parent in
-        List.iter keys ~f:(fun x ->
-            Hashtbl.set tbl ~key:x ~data:(find uf x));
-        Some tbl
+        List.iter t.eqs ~f:(fun (x, y) -> union uf x y);
 
-    let print_constraints (eqs : t) =
+        let conflict =
+            List.exists t.neqs ~f:(fun (x, y) -> find uf x = find uf y)
+        in
+        if conflict then None
+        else (
+            let tbl = Hashtbl.create (module Int) in
+            let roots = Hashtbl.create (module Int) in
+            let next_val = ref 0 in
+            let add_root root =
+                if not (Hashtbl.mem roots root) then (
+                    Hashtbl.set roots ~key:root ~data:!next_val;
+                    incr next_val)
+            in
+
+            let all_syms =
+                List.concat [ List.concat_map t.eqs ~f:(fun (x, y) -> [x; y]);
+                    List.concat_map t.neqs ~f:(fun (x, y) -> [x; y]) ]
+                |> List.dedup_and_sort ~compare:Int.compare
+            in
+
+            if List.is_empty all_syms then
+                Some (Hashtbl.create (module Int))
+            else (
+                List.iter all_syms ~f:(fun x ->
+                    let root = find uf x in
+                    add_root root;
+                    let v = Hashtbl.find_exn roots root in
+                    Hashtbl.set tbl ~key:x ~data:v);
+                Some tbl))
+
+    let print_constraints ({ eqs; neqs }: t) =
         print_endline "Equality constraints:";
-        if List.is_empty eqs then
+        if List.is_empty eqs && List.is_empty neqs then
             print_endline "  (none)"
         else
             List.iter eqs ~f:(fun (x, y) ->
                 Printf.printf "  %c = %c\n"
                     (Char.of_int_exn x)
                     (Char.of_int_exn y));
+        List.iter neqs ~f:(fun (x, y) ->
+            Printf.printf "  %c != %c\n"
+                (Char.of_int_exn x)
+                (Char.of_int_exn y));
         print_endline "-----"
 end
 
-module RangeTheory : LIATheory = struct
+module LIA : LIA = struct
     type range = {
         mutable lower : int option;
         mutable upper : int option;
@@ -96,17 +130,21 @@ module RangeTheory : LIATheory = struct
 
     let print_constraints constraints =
         print_endline "Integer constraints:";
-        List.iter constraints ~f:(fun (x, op, c) ->
-            let op_str =
-                match op with
-                | Binop.Less_than -> "<"
-                | Binop.Less_than_eq -> "<="
-                | Binop.Greater_than -> ">"
-                | Binop.Greater_than_eq -> ">="
-                | Binop.Equal -> "="
-                | Binop.Not_equal -> "!="
-            in
-            Printf.printf "  %c %s %d\n-----\n" (Char.of_int_exn x) op_str c)
+        if List.is_empty constraints then
+            print_endline "  (none)"
+        else
+            List.iter constraints ~f:(fun (x, op, c) ->
+                let op_str =
+                    match op with
+                    | Binop.Less_than -> "<"
+                    | Binop.Less_than_eq -> "<="
+                    | Binop.Greater_than -> ">"
+                    | Binop.Greater_than_eq -> ">="
+                    | Binop.Equal -> "="
+                    | Binop.Not_equal -> "!="
+                in
+                Printf.printf "  %c %s %d\n" (Char.of_int_exn x) op_str c);
+        print_endline "-----"
 
     let check constraints =
         let ranges = Hashtbl.create (module Int) in
@@ -155,7 +193,8 @@ module RangeTheory : LIATheory = struct
 end
 
 type constraint_record = {
-    eqs : (int * int) list;
+    eqs  : (int * int) list;
+    neqs : (int * int) list;
     ints : (int * Binop.iib Binop.t * int) list;
 }
 
@@ -163,59 +202,68 @@ let extract_constraints
     (model_pairs : ((bool, 'k) Formula.t * bool) list)
     : constraint_record =
     List.fold model_pairs
-        ~init:{ eqs = []; ints = [] }
+        ~init:{ eqs = []; neqs = []; ints = [] }
         ~f:(fun acc (atom, value) ->
             match atom, value with
-            | Formula.Binop (
-                ((Binop.Less_than
-                | Binop.Less_than_eq
-                | Binop.Greater_than
-                | Binop.Greater_than_eq
-                | Binop.Equal
-                | Binop.Not_equal) as op),
-                Formula.Key (I x),
-                Formula.Const_int c),
-                true ->
+            | Binop (Equal, Key x, Key y), true ->
+                { acc with eqs = (Utils.Separate.extract x,
+                    Utils.Separate.extract y) :: acc.eqs }
+
+            | Binop (Equal, Key x, Key y), false ->
+                { acc with neqs = (Utils.Separate.extract x,
+                    Utils.Separate.extract y) :: acc.neqs }
+
+            | Binop (Not_equal, Key (I x), Key (I y)), true ->
+                { acc with neqs = (x, y) :: acc.neqs }
+
+            | Binop (op, Key (I x), Const_int c), true ->
                 { acc with ints = (x, op, c) :: acc.ints }
 
-            | Formula.Not (Formula.Binop (Binop.Equal,
-                Formula.Key (I x),
-                Formula.Const_int c)), true ->
-                { acc with ints = (x, Binop.Not_equal, c) :: acc.ints }
-
-            | Formula.Binop (Binop.Equal,
-                Formula.Key (I x),
-                Formula.Key (I y)), true ->
-                { acc with eqs = (x, y) :: acc.eqs }
-
+            | Not (Binop (Equal, Key x, Key y)), true ->
+                { acc with neqs = (Utils.Separate.extract x, Utils.Separate.extract y) :: acc.neqs }
             | _ -> acc)
+    |> fun result -> {
+        eqs = List.dedup_and_sort ~compare:Poly.compare result.eqs;
+        neqs = List.dedup_and_sort ~compare:Poly.compare result.neqs;
+        ints = List.dedup_and_sort ~compare:Poly.compare result.ints
+    }
+;;
 
 let model (model_pairs : ((bool, 'k) Formula.t * bool) list)
     : (int, int) Hashtbl.t option =
-    let { eqs; ints } = extract_constraints model_pairs in
-    let normalized_ints = EqualityTheory.normalize ints eqs in
-    match RangeTheory.model normalized_ints with
+    let { eqs; ints; neqs } = extract_constraints model_pairs in
+    let normalized_ints = EUF.normalize ints { eqs; neqs }in
+    match LIA.model normalized_ints with
     | None -> None
     | Some int_model ->
-        Option.iter (EqualityTheory.model eqs) ~f:(fun eq_model ->
+        Option.iter (EUF.model { eqs; neqs }) ~f:(fun eq_model ->
             let pairs = Hashtbl.to_alist eq_model in
             List.iter pairs ~f:(fun (x, root) ->
-                match Hashtbl.find int_model root with
-                | Some v -> Hashtbl.set int_model ~key:x ~data:v
-                | None -> Hashtbl.set int_model ~key:x ~data:0));
-
+                if x <> 0 && root <> 0 then (
+                    match Hashtbl.find int_model root with
+                    | Some v ->
+                        Hashtbl.set int_model ~key:x ~data:v
+                    | None ->
+                        match Hashtbl.find int_model x with
+                        | Some v ->
+                            Hashtbl.set int_model ~key:root ~data:v
+                        | None ->
+                            if not (Hashtbl.mem int_model x) &&
+                                not (Hashtbl.mem int_model root)
+                            then Hashtbl.set int_model ~key:x ~data:0
+                )));
         Some int_model
 
 let check (model_pairs : ((bool, 'k) Formula.t * bool) list) : bool =
-    let { eqs; ints } = extract_constraints model_pairs in
+    let { eqs; neqs; ints } = extract_constraints model_pairs in
 
-    EqualityTheory.print_constraints eqs;
-    RangeTheory.print_constraints ints;
+    EUF.print_constraints {eqs; neqs;};
+    LIA.print_constraints ints;
 
-    let normalized_ints = EqualityTheory.normalize ints eqs in
+    let normalized_ints = EUF.normalize ints {eqs; neqs;} in
 
-    let eq_ok = EqualityTheory.check eqs in
-    let int_ok = RangeTheory.check normalized_ints in
+    let eq_ok = EUF.check {eqs; neqs;} in
+    let int_ok = LIA.check normalized_ints in
 
     eq_ok && int_ok
 
