@@ -46,6 +46,8 @@ let simplify_cnf (equal : 'a -> 'a -> bool) (a : 'a assignment) (cnf : 'a cnf)
   in
   aux [] cnf
 
+(** Repeatedly applies unit propagation on CNF, extending the assignment A
+    and simplifying clauses until no units remain or a conflict is found. *)
 let rec unit_propagate (equal : 'a -> 'a -> bool)
                        (a : 'a assignment)
                        (cnf : 'a cnf)
@@ -64,6 +66,7 @@ let rec unit_propagate (equal : 'a -> 'a -> bool)
       else unit_propagate equal a' cnf'
   | _ -> (a, cnf, false)
 
+(** Checks if CNF with current assignments A is satisfiable or not. *)
 let rec dpll (equal : 'a -> 'a -> bool)
              (a : 'a assignment)
              (cnf : 'a cnf)
