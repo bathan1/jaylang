@@ -241,15 +241,12 @@ let rec to_string : type a k. (a, k) t -> string = fun expr ->
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     let open Core in
     let open Smt.Formula in
+
     Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n";
     List.iteri exprs ~f:(fun i e ->
         Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
     print_endline "-----------------------------------";
 
-    let add_bool_binop acc (op : _ Smt.Binop.t) e1 e2 =
-        let f' = Binop (op, e1, e2) in
-        f' :: acc
-    in
     let rec collect_atoms : type a k. (bool, k) t list -> (a, k) t -> (bool, k) t list =
         fun acc f ->
         match f with
@@ -258,12 +255,12 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
         | Key (I _) -> acc
         | Not e -> collect_atoms acc e
         | And es -> List.fold_left es ~init:acc ~f:collect_atoms
-        | Binop (Equal, e1, e2) -> add_bool_binop acc Equal e1 e2
-        | Binop (Less_than, e1, e2) -> add_bool_binop acc Less_than e1 e2
-        | Binop (Greater_than, e1, e2) -> add_bool_binop acc Greater_than e1 e2
-        | Binop (Less_than_eq, e1, e2) -> add_bool_binop acc Less_than_eq e1 e2
+        | Binop (Equal, e1, e2) -> Binop (Equal, e1, e2) :: acc
+        | Binop (Less_than, e1, e2) -> Binop (Less_than, e1, e2) :: acc
+        | Binop (Greater_than, e1, e2) -> Binop (Greater_than, e1, e2) :: acc
+        | Binop (Less_than_eq, e1, e2) -> Binop (Less_than_eq, e1, e2) :: acc
         | Binop (Greater_than_eq, e1, e2) ->
-            add_bool_binop acc Greater_than_eq e1 e2
+            Binop (Greater_than_eq, e1, e2) :: acc
         | Binop (_, e1, e2) ->
             let acc = collect_atoms acc e1 in
             collect_atoms acc e2
@@ -370,36 +367,6 @@ let tokenize (s : string) : string list =
         | _ -> Buffer.add_char buf c);
     push ();
     List.rev !toks
-;;
-
-
-let parse_value_int (v : string) : (int, 'k) Smt.Formula.t =
-    let open Smt.Formula in
-    match Int.of_string_opt v with
-    | Some i -> Const_int i
-    | None -> Key (AsciiSymbol.make_int v)
-
-
-let parse_value_bool (v : string) : (bool, 'k) t =
-    let open Smt.Formula in
-    match String.lowercase v with
-    | "true" -> Const_bool true
-    | "false" -> Const_bool false
-    | _ -> Key (AsciiSymbol.make_bool v)
-;;
-
-let parse_value_any
-    (v1 : string)
-    (v2 : string)
-    : ('a, 'k) t * ('a, 'k) t
-    =
-    let open Smt.Formula in
-    match
-    (String.for_all v1 ~f:Char.is_digit, String.for_all v2 ~f:Char.is_digit)
-    with
-    | true, true -> Const_int (Int.of_string v1), Const_int (Int.of_string v2)
-    | false, false -> Key (AsciiSymbol.make_int v1), Key (AsciiSymbol.make_int v2)
-    | _ -> failwith "type mismatch in = or <> comparison"
 ;;
 
 let line_error count msg = sprintf "Line %d: %s" count msg
