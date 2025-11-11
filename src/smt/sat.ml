@@ -105,3 +105,30 @@ let rec dpll (equal : 'a -> 'a -> bool)
             | Some sol -> Some sol
             | None -> try_value false
 
+(** Given CNF, extract all forced assignments and simplify remainder. *)
+let simplify equal (cnf : 'a cnf) : ('a assignment * 'a cnf) =
+  let rec loop a cnf =
+    let cnf', conflict = simplify_cnf equal a cnf in
+    if conflict then (a, [])  (* or raise, depending on design *)
+    else
+      match List.find cnf' ~f:(fun c ->
+        List.count c ~f:(fun lit ->
+          match lit with
+          | Pos x | Neg x -> Option.is_none (lookup equal x a)
+        ) = 1)
+      with
+      | None -> (a, cnf')
+      | Some clause ->
+        let lit =
+          List.find_exn clause ~f:(fun l ->
+            match l with
+            | Pos x | Neg x -> Option.is_none (lookup equal x a))
+        in
+        let (v, value) =
+          match lit with
+          | Pos x -> (x, true)
+          | Neg x -> (x, false)
+        in
+        loop ((v, value) :: a) cnf'
+  in
+  loop [] cnf

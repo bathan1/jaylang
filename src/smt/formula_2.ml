@@ -3,6 +3,110 @@ open Smt.Sat
 (** Use same type as Smt.Formula.t *)
 type ('a, 'k) t = ('a, 'k) Smt.Formula.t
 
+let rec to_string : type a k. (a, k) t -> string = fun expr ->
+    let open Core in
+    match expr with
+    | Const_int i -> Int.to_string i
+    | Const_bool b -> Bool.to_string b
+    | Key s ->
+        (match s with
+            | I uid ->
+                Printf.sprintf "%c" (Char.of_int_exn uid)
+            | B uid ->
+                Printf.sprintf "%c" (Char.of_int_exn uid))
+
+    | Not e ->
+        Printf.sprintf "(not %s)" (to_string e)
+    | And es ->
+        let parts = List.map es ~f:to_string in
+        Printf.sprintf "(%s)" (String.concat ~sep:" ^ " parts)
+    | Binop (op, e1, e2) ->
+        let op_str =
+            match op with
+            | Equal -> "="
+            | Not_equal -> "!="
+            | Less_than -> "<"
+            | Less_than_eq -> "<="
+            | Greater_than -> ">"
+            | Greater_than_eq -> ">="
+            | Plus -> "+"
+            | Minus -> "-"
+            | Times -> "*"
+            | Divide -> "/"
+            | Modulus -> "mod"
+            | Or -> "or"
+        in
+        Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
+
+let extract_assignment (f : (bool, 'k) t) : ('k * int) option =
+    match f with
+    | Binop (Equal, Key (I sym), Const_int n)
+        | Binop (Equal, Const_int n, Key (I sym)) ->
+        Some (sym, n)
+    | _ -> None
+
+let simplify (exprs : (bool, 'k) t list) : (int * _ Smt.Binop.t, 'a) Hashtbl.t * (bool, 'k) t list =
+    let open Smt.Formula in
+    let open Smt.Binop in
+    let hash : (int * _ Smt.Binop.t, 'a) Hashtbl.t = Hashtbl.create 1 in
+    let rec hash_unit_literals hash exprs =
+        List.iter (fun expr -> 
+            begin match expr with
+                | Binop (Equal, Key (I x), Const_int value)
+                | Binop (Equal, Const_int value, Key (I x)) ->
+                    Hashtbl.add hash (x, Equal) value;
+                | Binop (Less_than_eq, Key (I x), Const_int value)
+                | Binop (Less_than_eq, Const_int value, Key (I x)) ->
+                    Hashtbl.add hash (x, Less_than_eq) value;
+                | Binop (Greater_than_eq, Key (I x), Const_int value)
+                | Binop (Greater_than_eq, Const_int value, Key (I x)) ->
+                    Hashtbl.add hash (x, Greater_than_eq) value;
+                | Binop (Less_than, Key (I x), Const_int value)
+                | Binop (Less_than, Const_int value, Key (I x)) ->
+                    Hashtbl.add hash (x, Less_than) value;
+                | Binop (Greater_than, Key (I x), Const_int value)
+                | Binop (Greater_than, Const_int value, Key (I x)) ->
+                    Hashtbl.add hash (x, Greater_than) value;
+                | And ls -> hash_unit_literals hash ls
+                | _ -> ()
+                end
+        ) exprs in
+    hash_unit_literals hash exprs;
+    let rec sub acc hash exprs =
+        List.filter_map
+            (fun expr ->
+                Printf.printf "here for expr=%s\n" (to_string expr);
+                match expr with
+                | Binop (_, Key (I _), Const_int _)
+                | Binop (_, Const_int _, Key (I _)) -> None
+
+                | Binop (Equal, Key (I x), Key (I y)) ->
+                    begin match Hashtbl.find_opt hash (x, Equal), Hashtbl.find_opt hash (y, Equal) with
+                    | Some vx, Some vy -> Some (Const_bool (vx = vy))
+                    | Some v, None -> Some (Binop (Equal, Const_int v, Key (I y)))
+                    | None, Some v -> Some (Binop (Equal, Key (I x), Const_int v))
+                    | _ -> Some (Binop (Equal, Key (I x), Key (I y)))
+                    end
+                | Binop (Greater_than, Key (I x), Key (I y)) ->
+                    begin match Hashtbl.find_opt hash (x, Equal), Hashtbl.find_opt hash (y, Equal) with
+                    | Some vx, Some vy -> Some (Const_bool (vx > vy))
+                    | Some v, None
+                    | None, Some v -> 
+                        Some (Binop (Greater_than, Key (I x), Const_int v))
+                    | _ -> 
+                        Printf.printf "nothing\n";
+                        Some (Binop (Greater_than, Key (I x), Key (I y)))
+                    end
+                | And ls ->
+                    let ls' = sub acc hash ls in
+                    Some (And ls')
+                | _ -> 
+                    Printf.printf "here %s?\n" (to_string expr);
+                    Some expr)
+            exprs
+    in
+    (hash, sub [] hash exprs)
+
 let rec tseitin (f : ('a, 'k) Smt.Formula.t)
     (fresh : ('a, 'k) t -> int)
     (cnf_acc : int cnf)
@@ -215,6 +319,8 @@ let rec collect_atoms : type a k. (bool, k) t list -> (a, k) t -> (bool, k) t li
         let acc = collect_atoms acc e1 in
         collect_atoms acc e2
 ;;
+
+
 let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     let open Core in
     let open Smt.Formula in
@@ -225,7 +331,7 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
 
     Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n";
     List.iteri exprs ~f:(fun i e ->
-        Printf.printf "Expr %d: %s\n" (i + 1) (Smt.Formula.to_string e));
+        Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
     print_endline "-----------------------------------";
 
     let atoms =
@@ -488,3 +594,4 @@ let of_string : type k. string -> (bool, k) Smt.Formula.t list =
             |> parse_formula !count
             |> fst 
         ))
+
