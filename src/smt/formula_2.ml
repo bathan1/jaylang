@@ -38,13 +38,6 @@ let rec to_string : type a k. (a, k) t -> string = fun expr ->
         in
         Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
 
-let extract_assignment (f : (bool, 'k) t) : ('k * int) option =
-    match f with
-    | Binop (Equal, Key (I sym), Const_int n)
-        | Binop (Equal, Const_int n, Key (I sym)) ->
-        Some (sym, n)
-    | _ -> None
-
 let simplify (exprs : (bool, 'k) t list) : (int * _ Smt.Binop.t, 'a) Hashtbl.t * (bool, 'k) t list =
     let open Smt.Formula in
     let open Smt.Binop in
@@ -75,7 +68,6 @@ let simplify (exprs : (bool, 'k) t list) : (int * _ Smt.Binop.t, 'a) Hashtbl.t *
     let rec sub acc hash exprs =
         List.filter_map
             (fun expr ->
-                Printf.printf "here for expr=%s\n" (to_string expr);
                 match expr with
                 | Binop (_, Key (I _), Const_int _)
                 | Binop (_, Const_int _, Key (I _)) -> None
@@ -94,7 +86,6 @@ let simplify (exprs : (bool, 'k) t list) : (int * _ Smt.Binop.t, 'a) Hashtbl.t *
                     | None, Some v -> 
                         Some (Binop (Greater_than, Key (I x), Const_int v))
                     | _ -> 
-                        Printf.printf "nothing\n";
                         Some (Binop (Greater_than, Key (I x), Key (I y)))
                     end
                 | And ls ->
