@@ -38,65 +38,188 @@ let rec to_string : type a k. (a, k) t -> string = fun expr ->
         in
         Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
 
-let simplify (exprs : (bool, 'k) t list) : (int * _ Smt.Binop.t, 'a) Hashtbl.t * (bool, 'k) t list =
-    let open Smt.Formula in
-    let open Smt.Binop in
-    let hash : (int * _ Smt.Binop.t, 'a) Hashtbl.t = Hashtbl.create 1 in
-    let rec hash_unit_literals hash exprs =
-        List.iter (fun expr -> 
-            begin match expr with
-                | Binop (Equal, Key (I x), Const_int value)
-                | Binop (Equal, Const_int value, Key (I x)) ->
-                    Hashtbl.add hash (x, Equal) value;
-                | Binop (Less_than_eq, Key (I x), Const_int value)
-                | Binop (Less_than_eq, Const_int value, Key (I x)) ->
-                    Hashtbl.add hash (x, Less_than_eq) value;
-                | Binop (Greater_than_eq, Key (I x), Const_int value)
-                | Binop (Greater_than_eq, Const_int value, Key (I x)) ->
-                    Hashtbl.add hash (x, Greater_than_eq) value;
-                | Binop (Less_than, Key (I x), Const_int value)
-                | Binop (Less_than, Const_int value, Key (I x)) ->
-                    Hashtbl.add hash (x, Less_than) value;
-                | Binop (Greater_than, Key (I x), Const_int value)
-                | Binop (Greater_than, Const_int value, Key (I x)) ->
-                    Hashtbl.add hash (x, Greater_than) value;
-                | And ls -> hash_unit_literals hash ls
-                | _ -> ()
-                end
-        ) exprs in
-    hash_unit_literals hash exprs;
-    let rec sub acc hash exprs =
-        List.filter_map
-            (fun expr ->
-                match expr with
-                | Binop (_, Key (I _), Const_int _)
-                | Binop (_, Const_int _, Key (I _)) -> None
+type lia_cst_t = {
+    neq : int list;
+    lower : int option;
+    upper : int option;
+}
 
-                | Binop (Equal, Key (I x), Key (I y)) ->
-                    begin match Hashtbl.find_opt hash (x, Equal), Hashtbl.find_opt hash (y, Equal) with
-                    | Some vx, Some vy -> Some (Const_bool (vx = vy))
-                    | Some v, None -> Some (Binop (Equal, Const_int v, Key (I y)))
-                    | None, Some v -> Some (Binop (Equal, Key (I x), Const_int v))
-                    | _ -> Some (Binop (Equal, Key (I x), Key (I y)))
-                    end
-                | Binop (Greater_than, Key (I x), Key (I y)) ->
-                    begin match Hashtbl.find_opt hash (x, Equal), Hashtbl.find_opt hash (y, Equal) with
-                    | Some vx, Some vy -> Some (Const_bool (vx > vy))
-                    | Some v, None
-                    | None, Some v -> 
-                        Some (Binop (Greater_than, Key (I x), Const_int v))
-                    | _ -> 
-                        Some (Binop (Greater_than, Key (I x), Key (I y)))
-                    end
-                | And ls ->
-                    let ls' = sub acc hash ls in
-                    Some (And ls')
-                | _ -> 
-                    Printf.printf "here %s?\n" (to_string expr);
-                    Some expr)
-            exprs
-    in
-    (hash, sub [] hash exprs)
+let empty_lia_cst : lia_cst_t = {
+    neq = [];
+    lower = None;
+    upper = None;
+}
+
+module IntMap = Map.Make (Int)
+
+let rec next :
+    type k.
+    lia_cst_t IntMap.t ->
+    (bool, k) t ->
+    lia_cst_t IntMap.t
+    = fun acc el ->
+    match el with
+    | Smt.Formula.Binop (op, Const_int v, Key (I x)) ->
+        let curr =
+            match IntMap.find_opt x acc with
+            | Some bounds -> bounds
+            | None -> empty_lia_cst
+        in
+        let cst =
+            match op with
+            | Equal -> { curr with lower = Some v; upper = Some (v + 1) }
+            | Not_equal -> { curr with neq = v :: curr.neq }
+            | Greater_than -> { curr with lower = Some (v + 1) }
+            | Greater_than_eq -> { curr with lower = Some v }
+            | Less_than -> { curr with upper = Some v }
+            | Less_than_eq -> { curr with upper = Some (v + 1) }
+        in
+        IntMap.add x cst acc
+    | Smt.Formula.Binop (op, Key (I x), Const_int v) ->
+        let curr =
+            match IntMap.find_opt x acc with
+            | Some bounds -> bounds
+            | None -> empty_lia_cst
+        in
+        let cst =
+            match op with
+            | Equal -> { curr with lower = Some v; upper = Some (v + 1) }
+            | Not_equal -> { curr with neq = v :: curr.neq }
+            | Greater_than -> { curr with lower = Some (v + 1) }
+            | Greater_than_eq -> { curr with lower = Some v }
+            | Less_than -> { curr with upper = Some v }
+            | Less_than_eq -> { curr with upper = Some (v + 1) }
+        in
+        IntMap.add x cst acc
+    | Smt.Formula.Binop (_, Key (I x), Key (I y)) ->
+        let acc =
+            if IntMap.mem x acc then acc else IntMap.add x empty_lia_cst acc
+        in
+        if IntMap.mem y acc then acc else IntMap.add y empty_lia_cst acc
+
+    | Smt.Formula.Key key ->
+        let x = Utils.Separate.extract key in
+        if IntMap.mem x acc then acc else IntMap.add x empty_lia_cst acc
+
+    | Smt.Formula.And ls ->
+        List.fold_left next acc ls
+
+    | _ -> acc
+;;
+
+let decide_eq :
+    type k.
+    (bool, k) t ->
+    lia_cst_t ->
+    lia_cst_t ->
+    (bool, k) t
+    = fun expr lcst rcst ->
+    let open Smt.Formula in
+    match (lcst.lower, lcst.upper, rcst.lower, rcst.upper) with
+    | (Some xl, Some xu, Some yl, Some yu) when xl = xu && yl = yu ->
+        Const_bool (xl = yl)
+    | (Some xl, Some xu, Some yl, Some yu) when xu < yl || yu < xl ->
+        Const_bool false
+    | (Some xl, Some xu, _, _) when xl = xu && List.mem xl rcst.neq ->
+        Const_bool false
+    | (_, _, Some yl, Some yu) when yl = yu && List.mem yl rcst.neq ->
+        Const_bool false
+    | _ -> expr;;
+
+
+let decide_neq :
+    type k.
+    (bool, k) t ->
+    lia_cst_t ->
+    lia_cst_t ->
+    (bool, k) t
+    = fun expr lcst rcst ->
+    match decide_eq expr lcst rcst with
+    | Const_bool true  -> Const_bool false
+    | Const_bool false -> Const_bool true
+    | _ -> expr
+;;
+
+let decide_gt :
+    type k.
+    int ->
+    int ->
+    lia_cst_t ->
+    lia_cst_t ->
+    (bool, k) t
+    = fun x y xcst ycst ->
+    match xcst.lower, xcst.upper, ycst.lower, ycst.upper with
+    | Some xl, _, _, Some yu when xl >= yu ->
+        Const_bool true
+    | _, Some xu, Some yl, _ when xu <= yl ->
+        Const_bool false
+    | (Some xl, Some xu, Some yl, Some yu)
+        when xu <= yl || yu <= xl ->
+        Const_bool (xl > yu)
+    | (Some xl, Some xu, None, None)
+        when xu - xl = 1 ->
+        Binop (Less_than_eq, Key (I y), Const_int xl)
+    | (None, None, Some yl, Some yu)
+        when yu - yl = 1 ->
+        Binop (Greater_than, Key (I x), Const_int yl)
+    | _ -> Binop (Greater_than, Key (I x), Key (I y))
+
+
+let rec sub :
+    type k.
+    lia_cst_t IntMap.t ->
+    (bool, k) t ->
+    (bool, k) t option
+    = fun acc expr ->
+    match expr with
+    | Binop (_, Key (I _), Const_int _)
+        | Binop (_, Const_int _, Key (I _)) -> None
+    | Binop (op, Key (I x), Key (I y)) ->
+        let x_cst = IntMap.find x acc
+        and y_cst = IntMap.find y acc
+        in
+        let decided_expr = 
+            (match op with
+                | Equal -> decide_eq expr x_cst y_cst
+                | Not_equal -> decide_neq expr x_cst y_cst
+                | Less_than_eq
+                    | Greater_than -> decide_gt x y x_cst y_cst
+                | Greater_than_eq
+                    | Less_than -> decide_gt x y y_cst x_cst)
+        in
+        Some decided_expr
+    | And rest ->
+        let simplified_subs =
+            rest
+            |> List.filter_map (sub acc)
+        in
+        let contains_false =
+            List.exists (function Smt.Formula.Const_bool false -> true | _ -> false) simplified_subs
+        in
+        if contains_false then Some (Const_bool false)
+        else
+            let non_trivial =
+                List.filter (function Smt.Formula.Const_bool true -> false | _ -> true) simplified_subs
+            in
+            begin match non_trivial with
+                | [] -> Some (Const_bool true)
+                | [single] -> Some single
+                | ls -> Some (And ls)
+                end
+    | _ -> Some expr
+;;
+
+let simplify
+    : type k.
+    (bool, k) t list ->
+    lia_cst_t IntMap.t * (bool, k) t list
+    = fun exprs ->
+    exprs
+    |> List.fold_left next (IntMap.empty : lia_cst_t IntMap.t)
+    |> fun tbl ->
+    List.filter_map (fun el -> sub tbl el) exprs
+    |> fun red -> (tbl, red)
+;;
 
 let rec tseitin (f : ('a, 'k) Smt.Formula.t)
     (fresh : ('a, 'k) t -> int)
@@ -431,158 +554,11 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
                 let model = model_of_pairs model_pairs in
                 Smt.Solution.Sat model
 
-open Core
 
 module AsciiSymbol = Smt.Symbol.Make(struct
+    open Core
     type t = string
     let uid (s : string) =
         String.fold s ~init:0 ~f:(fun acc c -> acc + Char.to_int c)
 end)
-
-let trim = String.strip
-
-let tokenize (s : string) : string list =
-    let buf = Buffer.create 16 in
-    let toks = ref [] in
-    let push () =
-        if Buffer.length buf > 0 then (
-            toks := Buffer.contents buf :: !toks;
-            Buffer.clear buf
-        )
-    in
-    String.iter s ~f:(fun c ->
-        match c with
-        | '(' | ')' | '^' ->
-            push ();
-            toks := String.of_char c :: !toks
-        | ' ' | '\t' -> push ()
-        | _ -> Buffer.add_char buf c);
-    push ();
-    List.rev !toks
-;;
-
-let line_error count msg = sprintf "Line %d: %s" count msg
-
-let rec parse_until_closing count toks depth acc =
-    match toks with
-    | [] ->
-        failwith (line_error count "unclosed parenthesis")
-    | ")" :: rest when depth = 0 ->
-        (List.rev acc, rest)
-    | ")" :: rest ->
-        parse_until_closing count rest (depth - 1) (")" :: acc)
-    | "(" :: rest ->
-        parse_until_closing count rest (depth + 1) ("(" :: acc)
-    | tok :: rest ->
-        parse_until_closing count rest depth (tok :: acc)
-
-let rec parse_arithmetic toks count : (int, 'k) Smt.Formula.t * string list =
-    let open Smt.Formula in
-    match toks with
-    | "(" :: rest ->
-        let inner_toks, rest_after = parse_until_closing count rest 0 [] in
-        let e, _ = parse_arithmetic inner_toks count in
-        parse_arith_tail e rest_after count
-
-    | "-" :: t :: rest when Option.is_some (Int.of_string_opt t) ->
-        (Const_int (- Int.of_string t), rest)
-
-    | t :: rest when Option.is_some (Int.of_string_opt t) ->
-        parse_arith_tail (Const_int (Int.of_string t)) rest count
-
-    | t :: rest ->
-        parse_arith_tail (Key (AsciiSymbol.make_int t)) rest count
-
-    | [] -> failwith (line_error count "unexpected end in arithmetic")
-
-and parse_arith_tail lhs toks count : (int, 'k) Smt.Formula.t * string list =
-    let open Smt.Formula in
-    let open Smt.Binop in
-    match toks with
-    | op :: rest when List.mem ["+"; "-"; "*"; "/"; "%"] op ~equal:String.equal ->
-        let rhs, rest' = parse_arithmetic rest count in
-        let bop =
-            match op with
-            | "+" -> Plus | "-" -> Minus | "*" -> Times
-            | "/" -> Divide | "%" -> Modulus | _ -> failwith "unreachable"
-        in
-        parse_arith_tail (Binop (bop, lhs, rhs)) rest' count
-    | _ -> (lhs, toks)
-
-let parse_comparison toks count : (bool, 'k) t * string list =
-    let open Smt.Formula in
-    let lhs, rest = parse_arithmetic toks count in
-    match rest with
-    | op :: rest' when List.mem ["="; "!="; ">="; ">"; "<="; "<"] op ~equal:String.equal ->
-        let rhs, rest'' = parse_arithmetic rest' count in
-        let bop =
-            match op with
-            | "=" -> Binop (Equal, lhs, rhs)
-            | "!=" -> Binop (Not_equal, lhs, rhs)
-            | ">=" -> Binop (Greater_than_eq, lhs, rhs) 
-            | ">" -> Binop (Greater_than, lhs, rhs)
-            | "<=" -> Binop (Less_than_eq, lhs, rhs)
-            | "<" -> Binop (Less_than, lhs, rhs)
-            | _ -> failwith "unreachable"
-        in (bop, rest'')
-    | ls -> sprintf "expected comparison operator near %s" (List.to_string ls ~f:(String.to_string))
-        |> line_error count
-        |> failwith
-;;
-
-type ('a, 'k) expr =
-    | BoolExpr of (bool, 'k) t
-    | IntExpr  of (int, 'k) t
-
-let rec parse_subexpr count toks : ('a, 'k) expr * string list =
-    match toks with
-    | "not" :: rest ->
-        let e, rest' = parse_subexpr count rest in
-        begin match e with
-            | BoolExpr b -> (BoolExpr (Not b), rest')
-            | IntExpr _ -> "cannot apply 'not' to arithmetic" |> line_error count |> failwith
-            end
-    | "(" :: rest ->
-        let inner_toks, rest_after = parse_until_closing count rest 0 [] in
-        let e, _ = parse_subexpr count inner_toks in
-        begin match rest_after with
-            | op :: _ when List.mem ["="; "!="; ">="; ">"; "<="; "<"] op ~equal:String.equal ->
-                let combined = inner_toks @ rest_after in
-                let e', rest'' = parse_comparison combined count in
-                (BoolExpr e', rest'')
-            | _ -> (e, rest_after)
-            end
-    | [] ->
-        failwith (line_error count "unexpected end, missing closing parenthesis")
-    | _ :: op :: _ when List.mem ["="; "!="; ">="; ">"; "<="; "<"] op ~equal:String.equal ->
-        let e, rest' = parse_comparison toks count in
-        (BoolExpr e, rest')
-    | _ :: op :: _ when List.mem ["+"; "-"; "*"; "/"; "%"] op ~equal:String.equal ->
-        let e, rest' = parse_arithmetic toks count in
-        (IntExpr e, rest')
-
-    | _ -> (BoolExpr (Key (AsciiSymbol.make_bool (List.hd_exn toks))), List.tl_exn toks)
-
-let parse_formula count toks : (bool, 'k) Smt.Formula.t * string list =
-    match parse_subexpr count toks with
-    | BoolExpr b, rest -> (b, rest)
-    | IntExpr _, _ -> "arithmetic cannot appear at top level" |> line_error count |> failwith
-
-let of_string : type k. string -> (bool, k) Smt.Formula.t list =
-    fun s ->
-    let count = ref 0 in
-    s
-    |> String.split_lines
-    |> List.filter_map ~f:(fun line ->
-        count := !count + 1;
-        line
-        |> String.strip
-        |> function 
-        | ln when String.is_empty ln -> None 
-        | ln -> Some (
-            ln 
-            |> tokenize 
-            |> parse_formula !count
-            |> fst 
-        ))
 
