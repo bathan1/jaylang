@@ -59,7 +59,7 @@ let rec next :
     lia_cst_t IntMap.t
     = fun acc el ->
     match el with
-    | Smt.Formula.Binop (op, Const_int v, Key (I x)) ->
+    | Formula.Binop (op, Const_int v, Key (I x)) ->
         let curr =
             match IntMap.find_opt x acc with
             | Some bounds -> bounds
@@ -75,7 +75,7 @@ let rec next :
             | Less_than_eq -> { curr with upper = Some (v + 1) }
         in
         IntMap.add x cst acc
-    | Smt.Formula.Binop (op, Key (I x), Const_int v) ->
+    | Formula.Binop (op, Key (I x), Const_int v) ->
         let curr =
             match IntMap.find_opt x acc with
             | Some bounds -> bounds
@@ -91,17 +91,17 @@ let rec next :
             | Less_than_eq -> { curr with upper = Some (v + 1) }
         in
         IntMap.add x cst acc
-    | Smt.Formula.Binop (_, Key (I x), Key (I y)) ->
+    | Formula.Binop (_, Key (I x), Key (I y)) ->
         let acc =
             if IntMap.mem x acc then acc else IntMap.add x empty_lia_cst acc
         in
         if IntMap.mem y acc then acc else IntMap.add y empty_lia_cst acc
 
-    | Smt.Formula.Key key ->
+    | Formula.Key key ->
         let x = Utils.Separate.extract key in
         if IntMap.mem x acc then acc else IntMap.add x empty_lia_cst acc
 
-    | Smt.Formula.And ls ->
+    | Formula.And ls ->
         List.fold_left next acc ls
 
     | _ -> acc
@@ -443,10 +443,10 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     and id_table = Hashtbl.create (module Int)
     and counter = ref 0 in
 
-    Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n";
-    List.iteri exprs ~f:(fun i e ->
-        Printf.printf "Expr %d: %s\n" (i + 1) (to_string e));
-    print_endline "-----------------------------------";
+    (* Printf.printf "\027[1;34m======= SMT solve() run =======\027[0m\n"; *)
+    (* List.iteri exprs ~f:(fun i e -> *)
+    (*     Printf.printf "Expr %d: %s\n" (i + 1) (to_string e)); *)
+    (* print_endline "-----------------------------------"; *)
 
     let atoms =
         exprs
@@ -459,9 +459,9 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
         Hashtbl.set id_table ~key:!counter ~data:atom;
         incr counter);
 
-    Printf.printf "\027[1;33mAtom table:\027[0m\n";
-    Hashtbl.iteri atom_table ~f:(fun ~key:atom ~data:id ->
-        Printf.printf "  %3d <-> %s\n" id (to_string atom));
+    (* Printf.printf "\027[1;33mAtom table:\027[0m\n"; *)
+    (* Hashtbl.iteri atom_table ~f:(fun ~key:atom ~data:id -> *)
+    (*     Printf.printf "  %3d <-> %s\n" id (to_string atom)); *)
 
     let fresh data =
         let v = !counter in
@@ -488,33 +488,33 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
     in
     let cnf = top_clauses @ cnf in
 
-    Printf.printf "CNF generated: %d clauses, %d vars\n"
-        (List.length cnf) !counter;
-    Printf.printf "CNF:\n";
-    List.iteri cnf ~f:(fun i clause ->
-        Printf.printf "  %d: %s\n" i
-            (String.concat ~sep:" ∨ "
-                (List.map clause ~f:(function
-                    | Pos x -> Printf.sprintf "v%d" x
-                    | Neg x -> Printf.sprintf "¬v%d" x))));
-    print_endline "-----------------------------------";
+    (* Printf.printf "CNF generated: %d clauses, %d vars\n" *)
+    (*     (List.length cnf) !counter; *)
+    (* Printf.printf "CNF:\n"; *)
+    (* List.iteri cnf ~f:(fun i clause -> *)
+    (*     Printf.printf "  %d: %s\n" i *)
+    (*         (String.concat ~sep:" ∨ " *)
+    (*             (List.map clause ~f:(function *)
+    (*                 | Pos x -> Printf.sprintf "v%d" x *)
+    (*                 | Neg x -> Printf.sprintf "¬v%d" x)))); *)
+    (* print_endline "-----------------------------------"; *)
 
     match dpll equal [] cnf with
     | None ->
-        print_endline "\027[1;31mSAT Result: UNSAT\027[0m";
-        print_endline "-----------------------------------\n";
+        (* print_endline "\027[1;31mSAT Result: UNSAT\027[0m"; *)
+        (* print_endline "-----------------------------------\n"; *)
         Smt.Solution.Unsat
     | Some assignment ->
-        print_endline "\027[1;32mSAT Result: SAT\027[0m";
-        Printf.printf "Raw assignment (%d vars):\n" (List.length assignment);
-        List.iter assignment ~f:(fun (id, value) ->
-            Printf.printf "  v%-3d = %B\n" id value);
-        print_endline "-----------------------------------";
+        (* print_endline "\027[1;32mSAT Result: SAT\027[0m"; *)
+        (* Printf.printf "Raw assignment (%d vars):\n" (List.length assignment); *)
+        (* List.iter assignment ~f:(fun (id, value) -> *)
+        (*     Printf.printf "  v%-3d = %B\n" id value); *)
+        (* print_endline "-----------------------------------"; *)
 
-        Printf.printf "ID table:\n";
-        Hashtbl.iteri id_table ~f:(fun ~key ~data ->
-            if Hashtbl.mem atom_table data then
-                Printf.printf "  %d -> %s\n" key (to_string data));
+        (* Printf.printf "ID table:\n"; *)
+        (* Hashtbl.iteri id_table ~f:(fun ~key ~data -> *)
+        (*     if Hashtbl.mem atom_table data then *)
+        (*         Printf.printf "  %d -> %s\n" key (to_string data)); *)
 
         let model_pairs =
             List.filter_map assignment ~f:(fun (id, value) ->
@@ -523,20 +523,20 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
                 ))
         in
 
-        if not (Smt.Theory.check model_pairs) then (
-            print_endline
-                "\027[1;31mTheory conflict — UNSAT after theory check.\027[0m";
-            print_endline "-----------------------------------\n";
-            Smt.Solution.Unsat)
+        if not (Theory.check model_pairs) then (
+            (* print_endline *)
+            (*     "\027[1;31mTheory conflict — UNSAT after theory check.\027[0m"; *)
+            (* print_endline "-----------------------------------\n"; *)
+            Solution.Unsat)
         else
-            match Smt.Theory.model model_pairs with
+            match Theory.model model_pairs with
             | None ->
-                print_endline "\027[1;31mTheory found no valid model.\027[0m";
-                print_endline "-----------------------------------\n";
-                Smt.Solution.Unsat
+                (* print_endline "\027[1;31mTheory found no valid model.\027[0m"; *)
+                (* print_endline "-----------------------------------\n"; *)
+                Solution.Unsat
             | Some int_model ->
-                let constraints = Smt.Theory.extract_constraints model_pairs in
-                Option.iter (Smt.Theory.EUF.model { eqs = constraints.eqs; neqs = constraints.neqs; }) ~f:(fun eq_model ->
+                let constraints = Theory.extract_constraints model_pairs in
+                Option.iter (Theory.EUF.model { eqs = constraints.eqs; neqs = constraints.neqs; }) ~f:(fun eq_model ->
                     Hashtbl.iteri eq_model ~f:(fun ~key:x ~data:root ->
                         match Hashtbl.find int_model root with
                         | Some v -> Hashtbl.set int_model ~key:x ~data:v
@@ -545,17 +545,17 @@ let solve (exprs : (bool, 'k) t list) : 'k Smt.Solution.t =
                                 | Some v -> Hashtbl.set int_model ~key:root ~data:v
                                 | None -> Hashtbl.set int_model ~key:x ~data:0)));
 
-                print_endline "\027[1;36mCombined theory model:\027[0m";
-                Hashtbl.iteri int_model ~f:(fun ~key ~data ->
-                    if key >= 97 && key <= 122 then
-                        Printf.printf "  %c = %d\n" (Char.of_int_exn key) data);
-                print_endline "-----------------------------------\n";
+                (* print_endline "\027[1;36mCombined theory model:\027[0m"; *)
+                (* Hashtbl.iteri int_model ~f:(fun ~key ~data -> *)
+                (*     if key >= 97 && key <= 122 then *)
+                (*         Printf.printf "  %c = %d\n" (Char.of_int_exn key) data); *)
+                (* print_endline "-----------------------------------\n"; *)
 
                 let model = model_of_pairs model_pairs in
-                Smt.Solution.Sat model
+                Solution.Sat model
 
 
-module AsciiSymbol = Smt.Symbol.Make(struct
+module AsciiSymbol = Symbol.Make(struct
     open Core
     type t = string
     let uid (s : string) =
