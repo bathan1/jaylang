@@ -166,13 +166,191 @@ end
 
 type 'k solver = (bool, 'k) t list -> 'k Solution.t
 
+type lia_cst_t = {
+  (** Encodes a linear integer arithmetic constraint for an integer symbol x
+      in range \[LOWER, UPPER), where:
+      - LOWER bound is {i inclusive} 
+      - UPPER bound is {i exclusive}. *)
+
+  (** List of ints that the symbol explicitly cannot be equal to. *)
+  neq : int list;
+  (** Inclusive lower bound. *)
+  lower : int option;
+  (** Exclusive upper bound. *)
+  upper : int option;
+}
+
+let empty_lia_cst : lia_cst_t = {
+  neq = [];
+  lower = None;
+  upper = None;
+}
+
+module IntMap = Map.Make (Int)
+
+let rec next :
+  type k.
+  lia_cst_t IntMap.t ->
+  (bool, k) t ->
+  lia_cst_t IntMap.t
+  = fun acc el ->
+  match el with
+  | Binop (op, Const_int v, Key (I x)) ->
+    let curr =
+      match Map.find acc x with
+      | Some bounds -> bounds
+      | None -> empty_lia_cst
+    in
+    let cst =
+      match op with
+      | Equal -> { curr with lower = Some v; upper = Some (v + 1) }
+      | Not_equal -> { curr with neq = v :: curr.neq }
+      | Greater_than -> { curr with lower = Some (v + 1) }
+      | Greater_than_eq -> { curr with lower = Some v }
+      | Less_than -> { curr with upper = Some v }
+      | Less_than_eq -> { curr with upper = Some (v + 1) }
+    in
+    Map.add_exn acc ~key:x ~data:cst
+  | Binop (op, Key (I x), Const_int v) ->
+    let curr =
+      match Map.find acc x with
+      | Some bounds -> bounds
+      | None -> empty_lia_cst
+    in
+    let cst =
+      match op with
+      | Equal -> { curr with lower = Some v; upper = Some (v + 1) }
+      | Not_equal -> { curr with neq = v :: curr.neq }
+      | Greater_than -> { curr with lower = Some (v + 1) }
+      | Greater_than_eq -> { curr with lower = Some v }
+      | Less_than -> { curr with upper = Some v }
+      | Less_than_eq -> { curr with upper = Some (v + 1) }
+    in
+    Map.add_exn acc ~key:x ~data:cst
+  | Binop (_, Key (I x), Key (I y)) ->
+    let acc =
+      if Map.mem acc x then acc else Map.add_exn acc ~key:x ~data:empty_lia_cst
+    in
+    if Map.mem acc y then acc else Map.add_exn acc ~key:y ~data:empty_lia_cst
+
+  | Key key ->
+    let x = Utils.Separate.extract key in
+    if Map.mem acc x then acc else Map.add_exn acc ~key:x ~data:empty_lia_cst
+
+  | And ls ->
+    List.fold ls ~f:next ~init:acc
+
+  | _ -> acc
+;;
+
+let decide_eq :
+  type k.
+  (bool, k) t ->
+  lia_cst_t ->
+  lia_cst_t ->
+  (bool, k) t
+  = fun expr lcst rcst ->
+  match (lcst.lower, lcst.upper, rcst.lower, rcst.upper) with
+  | (Some xl, Some xu, Some yl, Some yu) when xl = xu && yl = yu ->
+    Const_bool (xl = yl)
+  | (Some xl, Some xu, Some yl, Some yu) when xu < yl || yu < xl ->
+    Const_bool false
+  | (Some xl, Some xu, _, _) when xl = xu && List.mem rcst.neq xl ~equal:Int.equal ->
+    Const_bool false
+  | (_, _, Some yl, Some yu) when yl = yu && List.mem rcst.neq yl ~equal:Int.equal ->
+    Const_bool false
+  | _ -> expr;;
+
+let decide_gt :
+  type k.
+  int ->
+  int ->
+  lia_cst_t ->
+  lia_cst_t ->
+  (bool, k) t
+  = fun x y xcst ycst ->
+  match xcst.lower, xcst.upper, ycst.lower, ycst.upper with
+  | Some xl, _, _, Some yu when xl >= yu ->
+    Const_bool true
+  | _, Some xu, Some yl, _ when xu <= yl ->
+    Const_bool false
+  | (Some xl, Some xu, Some yl, Some yu)
+    when xu <= yl || yu <= xl ->
+    Const_bool (xl > yu)
+  | (Some xl, Some xu, None, None)
+    when xu - xl = 1 ->
+    Binop (Less_than_eq, Key (I y), Const_int xl)
+  | (None, None, Some yl, Some yu)
+    when yu - yl = 1 ->
+    Binop (Greater_than, Key (I x), Const_int yl)
+  | _ -> Binop (Greater_than, Key (I x), Key (I y))
+
+let decide (type k) (x, x_cst : int * lia_cst_t) (y, y_cst : int * lia_cst_t) ~(op : Binop.iib Binop.t) ~(fallback : (bool, k) t) = 
+  (match op with
+    | Equal -> decide_eq fallback x_cst y_cst
+    | Not_equal -> 
+      begin match decide_eq fallback x_cst y_cst with
+      | Const_bool v -> Const_bool (not v)
+      | _ -> fallback
+      end
+    | Less_than_eq
+      | Greater_than -> decide_gt x y x_cst y_cst
+    | Greater_than_eq
+      | Less_than -> decide_gt y x y_cst x_cst)
+
+let rec sub :
+  type k.
+  lia_cst_t IntMap.t ->
+  (bool, k) t ->
+  (bool, k) t option
+  = fun acc expr ->
+  match expr with
+  | Binop (_, Key (I _), Const_int _)
+    | Binop (_, Const_int _, Key (I _)) -> None
+  | Binop (op, Key (I x), Key (I y)) ->
+    (x, y)
+    |> fun (x, y) -> (Map.find_exn acc x, Map.find_exn acc y)
+    |> fun (x_cst, y_cst) -> ((x, x_cst), (y, y_cst))
+    |> fun (xc, yc) -> Some (decide xc yc ~op ~fallback:expr)
+  | And rest ->
+    rest
+    |> List.filter_map ~f:(sub acc)
+    |> (function 
+      | ls when List.exists ls ~f:(function Const_bool false -> true | _ -> false)
+        -> Some (Const_bool false)
+      | ls -> ls
+        |> List.filter ~f:(function Const_bool true -> false | _ -> true)
+        |> (function
+          | [] -> Some (Const_bool true)
+          | [single] -> Some single
+          | ls -> Some (And ls)))
+  | _ -> Some expr
+;;
+
+(** *)
+let simplify
+  : type k.
+  (bool, k) t list ->
+  lia_cst_t IntMap.t * (bool, k) t list
+  = fun exprs ->
+  exprs
+  |> List.fold ~f:next ~init:(IntMap.empty : lia_cst_t IntMap.t)
+  |> fun tbl ->
+  List.filter_map ~f:(fun el -> sub tbl el) exprs
+  |> fun red -> (tbl, red)
+;;
+
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
-    match and_ exprs with
-    | Const_bool false -> Unsat
-    | Const_bool true -> Sat Model.empty
-    | e -> X.solve [ M.transform e ]
+    exprs
+    |> and_
+    |> fun red -> simplify [red]
+    |> fun (_amap, red) -> List.hd_exn red
+    |> function
+      | Const_bool false -> Solution.Unsat
+      | Const_bool true -> Sat Model.empty
+      | e -> X.solve [ M.transform e ]
 end
 
