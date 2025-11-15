@@ -28,25 +28,36 @@ type (_, 'k) t =
   | Binop : ('a * 'a * 'b) Binop.t * ('a, 'k) t * ('a, 'k) t -> ('b, 'k) t
 
 module type LOGIC = sig
+  (** Encapsulates {i specific} subsets of theories for very simple
+      expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}. *)
+
+  (** Whatever type the logic works with, which can be anything. *)
   type atom
+
+  (** The frontend only works with {b DECIDABLE} logics, 
+      so we don't need to handle Unknowns. *)
   type 'k solution =
     | Sat of 'k Model.t
     | Unsat
 
-  (** Transform FORMULA into atoms list. *)
+  (** Transform FORMULA into a list of atoms to pass into [solve]. *)
   val extract : (bool, 'k) t -> atom list
 
   (** Search for a satisfying model of ATOMS, if some exists. *)
   val solve : atom list -> 'k solution
 
+  (** Rewrite FORMULA based on given MODEL. *)
   val propagate : 'k Model.t -> (bool, 'k) t -> (bool, 'k) t
 end
 
-
 module type SOLVABLE = sig
+  (** An 'adapter' for calling a solver backend in plain OCaml. *)
   include S
+  (** List of logics the solver should process prior to
+      calling the backend solve. *)
   val logics : (module LOGIC) list
 
+  (** Searches for a satisfying model of the {i conjunction} of EXPRS. *)
   val solve : (bool, 'k) t list -> 'k Solution.t
 end
 
@@ -248,8 +259,9 @@ module Make_solver (X : SOLVABLE) = struct
       in
       match simplified with
       | Const_bool false -> Solution.Unsat
-      | Const_bool true  -> Solution.Sat partial_model
+      | Const_bool true  -> printf "no shot?\n"; Solution.Sat partial_model
       | e'' ->
+        printf "uh %s\n" (to_string e'');
         (* backend solver *)
         let backend_solution = X.solve [ M.transform e'' ] in
         match backend_solution with
