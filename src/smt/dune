@@ -1,25 +1,21 @@
-
 (library
  (name smt)
  (public_name jay.smt)
- (libraries
-  core
-  preface
-  z3
-  utils
-  )
+ (libraries core preface z3 utils)
  (modules :standard \ bench)
  (synopsis "SMT module for the Jaylang project")
  (inline_tests)
- (instrumentation (backend landmarks --auto))
- (instrumentation (backend bisect_ppx))
- (preprocess (pps ppx_compare ocaml-monadic)))
+ (instrumentation
+  (backend landmarks --auto))
+ (instrumentation
+  (backend bisect_ppx))
+ (preprocess
+  (pps ppx_compare ocaml-monadic)))
 
 (executable
  (name bench)
  (public_name jay.smt.bench)
  (modules bench)
  (libraries core preface z3 utils smt overlays)
- (preprocess (pps ppx_compare ocaml-monadic))
-)
-
+ (preprocess
+  (pps ppx_compare ocaml-monadic)))

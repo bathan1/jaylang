@@ -57,6 +57,7 @@ test/sato/playing-ground
 /_notes
 *.txt
 vendor
+.editorconfig
 
 # paper related
 /docs/sato/paper
