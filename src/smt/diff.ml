@@ -1,3 +1,6 @@
+(* We include this specific implementation of [Formula.LOGIC] since
+   a large number of expressions the cevaluator generates
+   can be simplified / solved using Integer Difference Logic. *)
 open Core
 
 type atom = {
