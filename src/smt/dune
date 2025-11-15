@@ -19,7 +19,7 @@
  (name bench)
  (public_name jay.smt.bench)
  (modules bench)
- (libraries core preface z3 utils smt)
+ (libraries core preface z3 utils smt overlays)
  (preprocess (pps ppx_compare ocaml-monadic))
 )
 

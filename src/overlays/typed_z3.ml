@@ -88,6 +88,10 @@ module Make_of_context (C : CONTEXT) : Formula.SOLVABLE = struct
     Z3.Model.get_const_interp_e z3_model expr
     >>| unbox_expr
 
+  let logics : (module Smt.Formula.LOGIC) list = [
+    (module Smt.Diff)
+  ]
+
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
     let e = and_ exprs in
     if Z3.Expr.equal e (const_bool false)
