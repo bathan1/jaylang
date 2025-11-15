@@ -1,21 +1,24 @@
 open Core
 
 type atom = {
-  (** Encodes the relation [X - Y <= C], or equivalently,
-    [X <= Y + C].
-
-    IDL logic actually supports {i any} of the
-    following binary operators:
+(** Encodes the relation [X - Y <= C], or equivalently, [X <= Y + C].
+    The IDL logic itself supports {i any} of the following binary operators:
     {ol
-        {-[=]}
-        {-[<>] (structural inequality for us)}
-        {-[<]}
-        {-[<=]}
-        {-[>=]}
-        {-[>]} }
+      {-[=]}
+      {-[<>] (structural inequality for us)}
+      {-[<]}
+      {-[<=]}
+      {-[>=]}
+      {-[>]} }
     But we normalize [Formula] inputs into [<=] relations. *)
+
+  (** Variable (id) to subtract. *)
   x : int;
+
+  (** Variable (id) that subtracts [x]. *)
   y : int;
+
+  (** Intepreted as an int {i literal} *)
   c : int;
 };;
 
@@ -110,7 +113,8 @@ let of_global_model (model : 'k Model.t) ~(vars : int list)
       acc
   )
 
-
+(** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
+    This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases). *)
 let solve (atoms : atom list) : 'k solution =
   let vars =
     List.fold atoms ~init:Int.Set.empty ~f:(fun acc {x; y; _} ->
@@ -206,8 +210,9 @@ let collect_vars (formula : (bool,'k) Formula.t) : int list =
   in
   go [] formula
 
+(** Propagate MODEL into FORMULA to spit out a new residual [Formula]. *)
 let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
-  : (bool,'k) Formula.t =
+  : (bool, 'k) Formula.t =
   let vars = collect_vars formula in
   let model_unboxed = of_global_model model ~vars in
   let rec aux : type a. (a,'k) Formula.t -> (a,'k) Formula.t = fun f ->
