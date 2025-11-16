@@ -33,7 +33,7 @@ let run_hybrid expr (vars : int AsciiSymbol.t list) ~i =
   (match result with
    | Solution.Sat model ->
       Model.to_string model vars ~pp_assignment:(
-        fun (I uid) v -> sprintf "%c => %d" (Char.of_int_exn uid) v
+        fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
       )
       |> printf "SAT:\n%s\n";
    | Solution.Unsat -> printf "UNSAT\n"
@@ -59,7 +59,7 @@ let run_backend expr (vars : int AsciiSymbol.t list) ~i =
    | Solution.Sat model ->
         Model.to_string model vars ~pp_assignment:(
           fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
-        ) 
+        )
         |> printf "SAT:\n%s\n";
    | Solution.Unsat -> printf "UNSAT\n"
    | Solution.Unknown -> printf "UNKNOWN\n");
