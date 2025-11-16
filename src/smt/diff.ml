@@ -193,34 +193,10 @@ let solve (atoms : atom list) : 'k solution =
   loop dist
 ;;
 
-let collect_vars (formula : (bool,'k) Formula.t) : int list =
-  let rec go : type a. int list -> (a,'k) Formula.t -> int list =
-    fun acc f ->
-    match f with
-    | Const_bool _ | Const_int _ -> acc
-
-    | Key (I x) ->
-      x :: acc
-
-    | Key _ ->
-      acc
-
-    | Not e ->
-      go acc e
-
-    | And es ->
-      List.fold es ~init:acc ~f:(fun acc e -> go acc e)
-
-    | Binop (_, l, r) ->
-      let acc = go acc l in
-      go acc r
-  in
-  go [] formula
-
 (** Propagate MODEL into FORMULA to spit out a new residual [Formula]. *)
 let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
   : (bool, 'k) Formula.t =
-  let vars = collect_vars formula in
+  let vars = Formula.keys formula in
   let model_unboxed = of_global_model model ~vars in
   let rec aux : type a. (a,'k) Formula.t -> (a,'k) Formula.t = fun f ->
     match f with

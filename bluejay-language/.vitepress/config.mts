@@ -14,9 +14,7 @@ export default defineConfig({
         // https://vitepress.dev/reference/default-theme-config
         nav: [
             { text: 'Home', link: '/' },
-            { text: 'Language', link: '/language' },
-            { text: 'Implementation', link: '/implementation' },
-            { text: "Spec", link: "/spec" }
+            { text: "API Reference", link: "/_html/index.html", target: "_blank" }
         ],
 
         sidebar: [

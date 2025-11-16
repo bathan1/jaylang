@@ -235,6 +235,7 @@ let rec to_string : type a k. ?key:(int -> bool -> string) -> (a, k) t -> string
     in
     sprintf "(%s %s %s)" (to_string e1 ~key) op_str (to_string e2 ~key)
 
+(** Evaluate constant literals from FORMULA. *)
 let rec evaluate : type a k. (a, k) t -> (a, k) t = function
   | Const_int _ as e -> e
   | Const_bool _ as e -> e
@@ -300,3 +301,27 @@ module Make_solver (X : SOLVABLE) = struct
         | other -> other
 end
 
+(** Get the uids of all the keys in FORMULA. *)
+let keys (formula : (bool, 'k) t) : int list =
+  let rec go : type a. int list -> (a, 'k) t -> int list =
+    fun acc f ->
+    match f with
+    | Const_bool _ | Const_int _ -> acc
+
+    | Key (I x) ->
+      x :: acc
+
+    | Key _ ->
+      acc
+
+    | Not e ->
+      go acc e
+
+    | And es ->
+      List.fold es ~init:acc ~f:(fun acc e -> go acc e)
+
+    | Binop (_, l, r) ->
+      let acc = go acc l in
+      go acc r
+  in
+  go [] formula
