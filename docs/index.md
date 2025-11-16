@@ -4,8 +4,8 @@ layout: home
 
 hero:
   name: "Bluejay"
-  text: "Next level type safety"
-  tagline: My great project tagline
+  text: "Type"
+  tagline: Type safety on a new level
   actions:
     - theme: brand
       text: Markdown Examples

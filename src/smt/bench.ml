@@ -17,17 +17,8 @@ module AsciiSymbol = Smt.Symbol.Make (struct
   let uid = Stdlib.Char.code
 end)
 
-let extract = Utils.Separate.extract
-
-let assignment_to_string model =
-  Model.to_string model ~f:(
-    fun symbol (assignment : int) ->
-    sprintf "%c <- %d" (Char.of_int_exn (extract symbol)) assignment
-  )
-
 let run_hybrid expr (vars : int AsciiSymbol.t list) ~i =
   let start_time = Time_ns.now () in
-
   printf "(%d) Hybrid solve on: %s\n"
     i
     (Formula.to_string expr ~key:(fun uid _is_bool ->
@@ -41,8 +32,10 @@ let run_hybrid expr (vars : int AsciiSymbol.t list) ~i =
   (* print the result *)
   (match result with
    | Solution.Sat model ->
-       List.iter vars ~f:(fun symbol ->
-         symbol |> assignment_to_string model |> printf "%s\n")
+      Model.to_string model vars ~pp_assignment:(
+        fun (I uid) v -> sprintf "%c => %d" (Char.of_int_exn uid) v
+      )
+      |> printf "SAT:\n%s\n";
    | Solution.Unsat -> printf "UNSAT\n"
    | Solution.Unknown -> printf "UNKNOWN\n");
 
@@ -64,8 +57,10 @@ let run_backend expr (vars : int AsciiSymbol.t list) ~i =
   (* print the result *)
   (match result with
    | Solution.Sat model ->
-       List.iter vars ~f:(fun symbol ->
-         symbol |> assignment_to_string model |> printf "%s\n")
+        Model.to_string model vars ~pp_assignment:(
+          fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
+        ) 
+        |> printf "SAT:\n%s\n";
    | Solution.Unsat -> printf "UNSAT\n"
    | Solution.Unknown -> printf "UNKNOWN\n");
 
@@ -146,6 +141,7 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
     Binop (Equal, Key d, Const_int 123456);
   ];
 
+  (* 10 *)
   And [
     Binop (Equal, Key a, Const_int 123456);
     Binop (Equal, Key b, Const_int 123456);
