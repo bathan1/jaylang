@@ -2,6 +2,8 @@ open Core
 open Overlays
 open Smt
 
+module Backend_z3 = Formula.Make_solver(Typed_z3)
+
 module Hybrid_z3 = Formula.Make_solver (struct
   include Typed_z3
   let logics : (module Formula.LOGIC) list = [
@@ -23,24 +25,51 @@ let assignment_to_string model =
     sprintf "%c <- %d" (Char.of_int_exn (extract symbol)) assignment
   )
 
-let run_hybrid expr (vars : int AsciiSymbol.t list)=
-  printf "Hybrid solve on: %s\n" (
-    Formula.to_string expr ~key:(fun uid _is_bool ->
-      uid |> Char.of_int_exn |> Char.to_string
-    )
-  );
-  [expr]
-  |> Hybrid_z3.solve
-  |> function
-  | Solution.Sat model -> (
-    List.iter vars ~f:(fun symbol -> (
-      symbol
-      |> assignment_to_string model
-      |> printf "%s\n"
-    ))
-  )
-  | Solution.Unsat -> printf "UNSAT\n"
-  | Solution.Unknown -> printf "UNKNOWN\n"
+let run_hybrid expr (vars : int AsciiSymbol.t list) ~i =
+  let start_time = Time_ns.now () in
+
+  printf "(%d) Hybrid solve on: %s\n"
+    i
+    (Formula.to_string expr ~key:(fun uid _is_bool ->
+       uid |> Char.of_int_exn |> Char.to_string));
+
+  let result = Hybrid_z3.solve [expr] in
+
+  let duration = Time_ns.(diff (now ()) start_time) in
+  let duration_str = Time_ns.Span.to_string_hum duration in
+
+  (* print the result *)
+  (match result with
+   | Solution.Sat model ->
+       List.iter vars ~f:(fun symbol ->
+         symbol |> assignment_to_string model |> printf "%s\n")
+   | Solution.Unsat -> printf "UNSAT\n"
+   | Solution.Unknown -> printf "UNKNOWN\n");
+
+  printf "⏱  Solve time: %s\n\n" duration_str
+
+let run_backend expr (vars : int AsciiSymbol.t list) ~i =
+  let start_time = Time_ns.now () in
+
+  printf "(%d) Backend solve on: %s\n"
+    i
+    (Formula.to_string expr ~key:(fun uid _is_bool ->
+       uid |> Char.of_int_exn |> Char.to_string));
+
+  let result = Backend_z3.solve [expr] in
+
+  let duration = Time_ns.(diff (now ()) start_time) in
+  let duration_str = Time_ns.Span.to_string_hum duration in
+
+  (* print the result *)
+  (match result with
+   | Solution.Sat model ->
+       List.iter vars ~f:(fun symbol ->
+         symbol |> assignment_to_string model |> printf "%s\n")
+   | Solution.Unsat -> printf "UNSAT\n"
+   | Solution.Unknown -> printf "UNKNOWN\n");
+
+  printf "⏱  Solve time: %s\n\n" duration_str
 
 let _ =
   "
@@ -127,4 +156,4 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
 
 let () =
   exprs
-  |> List.iter ~f:(fun expr -> run_hybrid expr [a; b; c; d; e])
+  |> List.iteri ~f:(fun i expr -> run_hybrid ~i:(i + 1) expr [a; b; c; d; e]; run_backend ~i:(i + 1) expr [a; b; c; d; e;] )
