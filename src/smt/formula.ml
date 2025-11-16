@@ -1,5 +1,3 @@
-[@@@warning "-6"]
-
 open Core
 
 module type S = sig

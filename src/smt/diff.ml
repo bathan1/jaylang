@@ -3,7 +3,6 @@
    can be simplified / solved using Integer Difference Logic. *)
 open Core
 
-type atom = {
 (** Encodes the relation [X - Y <= C], or equivalently, [X <= Y + C].
     The IDL logic itself supports {i any} of the following binary operators:
     {ol
@@ -14,7 +13,7 @@ type atom = {
       {-[>=]}
       {-[>]} }
     But we normalize [Formula] inputs into [<=] relations. *)
-
+type atom = {
   (** Variable (id) to subtract. *)
   x : int;
 
@@ -108,18 +107,6 @@ let to_global_model (dist : int Int.Map.t) : 'k Model.t =
       )
   };;
 
-
-let of_global_model (model : 'k Model.t) ~(vars : int list)
-  : int Int.Map.t =
-  List.fold vars ~init:Int.Map.empty ~f:(fun acc x ->
-    match model.value (I x) with
-    | Some v ->
-      let v_int = (v : int) in
-      Map.set acc ~key:x ~data:v_int
-    | None ->
-      acc
-  )
-
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
     This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases). *)
 let solve (atoms : atom list) : 'k solution =
@@ -153,7 +140,11 @@ let solve (atoms : atom list) : 'k solution =
   );
   let rec loop dist =
     if Queue.is_empty q then
-      Sat (to_global_model dist)
+      Sat (
+        Model.of_local dist ~lookup:(
+          fun loc key _is_bool -> Map.find loc key
+        )
+      )
     else begin
       let u = Queue.dequeue_exn q in
       Hashtbl.set in_queue ~key:u ~data:false;
@@ -197,7 +188,10 @@ let solve (atoms : atom list) : 'k solution =
 let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
   : (bool, 'k) Formula.t =
   let vars = Formula.keys formula in
-  let model_unboxed = of_global_model model ~vars in
+  let model_unboxed = Model.fold model vars 
+    ~init:(Int.Map.empty) 
+    ~f:(fun acc key data -> Map.set acc ~key ~data)
+  in
   let rec aux : type a. (a,'k) Formula.t -> (a,'k) Formula.t = fun f ->
     match f with
     | Const_bool _ -> f
