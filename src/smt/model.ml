@@ -9,13 +9,15 @@ type 'k t = {
 (** Lookup calls will just return [None] *)
 let empty : 'k t = { value = (fun _ -> None) }
 
-(** Combine partial models LEFT and RIGHT using the "most recent model" 
+(** Combine partial models LEFT and RIGHT using the "most recent model"
     strategy (RIGHT is most recent). *)
 let merge (left : 'k t) (right : 'k t) : 'k t =
   {
-    value =
-      (fun (type a) (symbol : (a, 'k) Symbol.t) ->
-        match right.value symbol with Some v -> Some v | None -> left.value symbol);
+    value = fun (type a) (symbol : (a, 'k) Symbol.t) -> (
+      match right.value symbol with 
+      | Some v -> Some v 
+      | None -> left.value symbol
+    )
   }
 
 (** Pretty-print SYMBOLS in MODEL. If no assignments are present, returns ["{}"].
@@ -27,7 +29,7 @@ let merge (left : 'k t) (right : 'k t) : 'k t =
     <pp_assignment s1 v1>
     <pp_assignment s2 v2>
     ...
-    } 
+    }
 *)
 let to_string
     (type a k)
@@ -37,21 +39,16 @@ let to_string
     ~(pp_assignment : (a, k) Symbol.t -> a -> string)
   : string
 =
-  let assignments =
     symbols
     |> List.filter_map ~f:(fun sym ->
          match model.value sym with
          | Some v -> Some (pp_assignment sym v)
          | None -> None)
-  in
-
-  match assignments with
-  | [] ->
-      "{}"
-
-  | _ ->
-      let body =
-        String.concat ~sep assignments
-      in
-      Printf.sprintf "{%s%s%s}" sep body sep
+    |> function
+      | [] -> "{}"
+      | assignments ->
+          let body =
+            String.concat ~sep assignments
+          in
+          Printf.sprintf "{%s%s%s}" sep body sep
 

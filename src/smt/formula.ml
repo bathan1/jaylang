@@ -200,15 +200,10 @@ type 'k solver = (bool, 'k) t list -> 'k Solution.t
     Key function is passed uid, then a bool flag that indicates if it
     is a bool key or an int key. *)
 let rec to_string : type a k. ?key:(int -> bool -> string) -> (a, k) t -> string =
-  fun ?key formula ->
-  let key =
-    match key with
-    | Some f -> f
-    | None -> (
-      fun uid is_bool ->
-        sprintf "<%s#%d>" (if is_bool then "BoolKey" else "IntKey") uid
-      )
-  in
+  fun
+    ?(key=fun uid is_bool -> (
+      sprintf "<%s#%d>" (if is_bool then "BoolKey" else "IntKey") uid
+    )) formula ->
   match formula with
   | Const_int i -> Int.to_string i
   | Const_bool b -> Bool.to_string b
@@ -240,6 +235,25 @@ let rec to_string : type a k. ?key:(int -> bool -> string) -> (a, k) t -> string
     in
     sprintf "(%s %s %s)" (to_string e1 ~key) op_str (to_string e2 ~key)
 
+let rec evaluate : type a k. (a, k) t -> (a, k) t = function
+  | Const_int _ as e -> e
+  | Const_bool _ as e -> e
+  | Key _ as e -> e
+
+  | Not e ->
+      let e' = evaluate e in
+      not_ e'
+
+  | And es ->
+      es
+      |> List.map ~f:evaluate
+      |> and_
+
+  | Binop (op, e1, e2) ->
+      let e1' = evaluate e1 in
+      let e2' = evaluate e2 in
+      binop op e1' e2'
+
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
@@ -270,12 +284,14 @@ module Make_solver (X : SOLVABLE) = struct
               (acc_model', residual)
           )
       in
-      printf "Residual: %s\n" (to_string simplified ~key:(fun uid _is_bool -> sprintf"%c" (Char.of_int_exn uid)));
-      match simplified with
+      printf "Simplified: %s\n" (to_string simplified ~key:(fun uid _ -> Char.of_int_exn uid |> Char.to_string));
+      match evaluate simplified with
       | Const_bool false -> Solution.Unsat
       | Const_bool true  ->
+        printf "HIT early-solve\n";
         Solution.Sat partial_model
       | e'' ->
+        printf "MISS early-solve, deferring to backend: %s\n" (to_string simplified ~key:(fun uid _ -> Char.of_int_exn uid |> Char.to_string));
         (* backend solver *)
         let backend_solution = X.solve [ M.transform e'' ] in
         match backend_solution with
