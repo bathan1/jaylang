@@ -30,6 +30,7 @@ export default defineConfig({
                 text: 'Implementation',
                 items: [
                     { text: 'Z3', link: '/implementation/z3' },
+                    { text: 'SMT', link: '/implementation/smt' },
                 ]
             },
             {

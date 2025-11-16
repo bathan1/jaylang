@@ -34,7 +34,7 @@ module type LOGIC = sig
   (** Whatever type the logic works with, which can be anything. *)
   type atom
 
-  (** The frontend only works with {b DECIDABLE} logics, 
+  (** The frontend only works with {b DECIDABLE} logics,
       so we don't need to handle Unknowns. *)
   type 'k solution =
     | Sat of 'k Model.t
@@ -193,22 +193,33 @@ end
 
 type 'k solver = (bool, 'k) t list -> 'k Solution.t
 
-let rec to_string : type a k. (a, k) t -> string = fun expr ->
-  match expr with
+(** Pretty prints FORMULA, with optional KEY function.
+
+    Key function is passed uid, then a bool flag that indicates if it
+    is a bool key or an int key. *)
+let rec to_string : type a k. ?key:(int -> bool -> string) -> (a, k) t -> string =
+  fun ?key formula ->
+  let key =
+    match key with
+    | Some f -> f
+    | None -> (
+      fun uid is_bool ->
+        sprintf "<%s#%d>" (if is_bool then "BoolKey" else "IntKey") uid
+      )
+  in
+  match formula with
   | Const_int i -> Int.to_string i
   | Const_bool b -> Bool.to_string b
-  | Key s ->
-    (match s with
-      | I uid ->
-        Printf.sprintf "<IntKey#%d>" uid
-      | B uid ->
-        Printf.sprintf "<BoolKey#%d>" uid)
-
+  | Key s -> (
+    match s with
+    | I uid -> key uid false
+    | B uid -> key uid true
+  )
   | Not e ->
-    Printf.sprintf "(not %s)" (to_string e)
+    sprintf "(not %s)" (to_string e ~key)
   | And es ->
-    let parts = List.map es ~f:to_string in
-    Printf.sprintf "(%s)" (String.concat ~sep:" ^ " parts)
+    let parts = List.map es ~f:(to_string ~key) in
+    sprintf "(%s)" (String.concat ~sep:" ^ " parts)
   | Binop (op, e1, e2) ->
     let op_str =
       match op with
@@ -225,7 +236,7 @@ let rec to_string : type a k. (a, k) t -> string = fun expr ->
       | Modulus -> "mod"
       | Or -> "or"
     in
-    Printf.sprintf "(%s %s %s)" (to_string e1) op_str (to_string e2)
+    sprintf "(%s %s %s)" (to_string e1 ~key) op_str (to_string e2 ~key)
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
@@ -259,9 +270,9 @@ module Make_solver (X : SOLVABLE) = struct
       in
       match simplified with
       | Const_bool false -> Solution.Unsat
-      | Const_bool true  -> printf "no shot?\n"; Solution.Sat partial_model
+      | Const_bool true  ->
+        Solution.Sat partial_model
       | e'' ->
-        printf "uh %s\n" (to_string e'');
         (* backend solver *)
         let backend_solution = X.solve [ M.transform e'' ] in
         match backend_solution with
