@@ -62,27 +62,31 @@ let extract (formula : (bool, 'k) Formula.t) : atom list =
     exprs
     |> List.map ~f:(
       function
+      | Formula.Not Formula.Binop (Greater_than, Key (I x), Key (I y))
       | Formula.Binop (Less_than_eq, Key (I x), Key (I y)) ->
         [{ x; y; c = 0 }]
 
+      | Formula.Not Formula.Binop (Greater_than, Key (I x), Const_int c)
       | Formula.Binop (Less_than_eq, Key (I x), Const_int c)
-        | Formula.Binop (Less_than_eq, Const_int c, Key (I x)) ->
+      | Formula.Binop (Greater_than, Const_int c, Key (I x)) ->
         [{ x; y = 0; c }]
 
       | Formula.Binop (Equal, Key (I x), Key (I y)) ->
-        [   { x; y; c = 0 };
+        [ { x; y; c = 0 };
           { x = y; y = x; c = 0 } ]
 
       | Formula.Binop (Equal, Key (I x), Const_int c)
         | Formula.Binop (Equal, Const_int c, Key (I x)) ->
-        [   { x; y = 0; c; };
+        [ { x; y = 0; c; };
           {x = 0; y = x; c = -c } ]
 
+      | Formula.Not Formula.Binop (Less_than, Key (I x), Key (I y))
       | Formula.Binop (Greater_than_eq, Key (I x), Key (I y)) ->
         [ { x = y; y = x; c = 0 } ]
 
+      | Formula.Not Formula.Binop (Less_than, (Key I x), Const_int c)
       | Formula.Binop (Greater_than_eq, Key (I x), Const_int c)
-        | Formula.Binop (Greater_than_eq, Const_int c, Key (I x)) ->
+      | Formula.Binop (Greater_than_eq, Const_int c, Key (I x)) ->
         [ {x = 0; y = x; c = -c}  ]
 
       | _ -> [])

@@ -1,3 +1,5 @@
+[@@@warning "-6"]
+
 open Core
 
 module type S = sig
@@ -268,6 +270,7 @@ module Make_solver (X : SOLVABLE) = struct
               (acc_model', residual)
           )
       in
+      printf "Residual: %s\n" (to_string simplified ~key:(fun uid _is_bool -> sprintf"%c" (Char.of_int_exn uid)));
       match simplified with
       | Const_bool false -> Solution.Unsat
       | Const_bool true  ->
