@@ -70,3 +70,6 @@ vendor
 
 # Language extension files
 *.vsix
+
+# Hoisted odoc build
+/docs/public/
