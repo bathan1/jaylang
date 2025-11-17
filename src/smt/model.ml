@@ -1,8 +1,7 @@
 open Core
 
 (** Generic map-like type of symbols FROM namespace ['k] TO assignments
-    of type ['a].
-*)
+    of type ['a]. *)
 type 'k t = {
   (** Lookup the value of SYMBOL, if Some exists. *)
   value : 'a. ('a, 'k) Symbol.t -> 'a option;
@@ -100,7 +99,7 @@ let fold
     It should return an [option] of whatever value LOCAL holds for the
     given [uid].
 
-    For example, we can cast an [Int.Map] to a model [t] by
+    Example:
     {[
       if Queue.is_empty q then
         Sat (

@@ -54,7 +54,7 @@ end
     You can bind a [LOGIC] list of modules to LOGICS in order
     to preprocess (and hopefully outright solve) future
     calls to SOLVE [[ t ]].
-  
+
     For example, {!Overlays.Typed_z3} can be used as an argument to {!Make_solver}:
 {[
 module Backend_z3 = Formula.Make_solver(Typed_z3)
