@@ -12,7 +12,7 @@ open Core
       {-[<=]}
       {-[>=]}
       {-[>]} }
-    But we normalize [Formula] inputs into [<=] relations. *)
+    This module normalizes all inputs into [<=] relations. *)
 type atom = {
   (** Variable (id) to subtract. *)
   x : int;
@@ -32,40 +32,16 @@ type 'k solution =
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
 
-    From each [And] list element, we handle exactly 3 binary operations:
-    {ol
-        {-[<=]}
-        {-[=]}
-        {-[>=]}
-    }
-    For {i each} binary operator, we just need to handle 2 relations:
-    {ol
-        {- [Key, Key] }
-        {- [Key, Const_int] (The reverse is also handled under the same match) }
-    }
-
-    That's {b 6} total cases to handle:
-    {ol
-        {- x ≤ y becomes x − y ≤ 0 }
-        {- x ≤ c becomes x − 0 ≤ c }
-        {- x = y becomes the {b pair} x − y ≤ 0, y − x ≤ 0 }
-        {- x = c becomes the {b pair} x − 0 ≤ c, 0 − x ≤ −c }
-        {- x ≥ y becomes y − x ≤ 0 }
-        {- x ≥ c becomes 0 − x ≤ −c }
-    }
-    Any other {!Formula.t} type is ignored.
-
-    Example:
-{[
-let () =
-  Diff.extract (And [
-    Binop (Equal, Key a, Key b);
-    Binop (Equal, Key c, Key d);
-    Binop (Equal, Const_int 1, Const_int 1);
-  ])
-  |> fun ls -> printf "%d\n" (List.length ls)
-  (* Prints: 4 *)
-]}
+    {3 Example}
+    {[
+    let () =
+      Diff.extract (And [
+        Binop (Less_than_eq, Key a, Key b);
+        Binop (Less_than_eq, Key c, Key d);
+      ])
+      |> fun ls -> printf "%d\n" (List.length ls)
+      (* Prints: 2 *)
+    ]}
 *)
 let extract (formula : (bool, 'k) Formula.t) : atom list =
   formula
@@ -109,22 +85,22 @@ let extract (formula : (bool, 'k) Formula.t) : atom list =
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
     This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases).
 
-    Example:
-{[
-let () =
-  let atoms = [
-    Diff.atom ~x:0 ~y:1 ~c:3;   (* x - y <= 3 *)
-    Diff.atom ~x:1 ~y:Const ~c:10;  (* y <= 10 *)
-  ] in
+    {3 Example}
+    {[
+    let () =
+      let atoms = [
+        Diff.atom ~x:0 ~y:1 ~c:3;   (* x - y <= 3 *)
+        Diff.atom ~x:1 ~y:Const ~c:10;  (* y <= 10 *)
+      ] in
 
-  match solve atoms with
-  | Sat model ->
-      (* Access a bound: model.value (I 0) -> int option *)
-      printf "SAT: upper bound on x = %d\n"
-        (Option.value_exn (model.value (I 0)))
-  | Unsat ->
-      printf "UNSAT\n"
-]}
+      match solve atoms with
+      | Sat model ->
+          (* Access a (tight) upper bound: model.value (I 0) -> int option *)
+          printf "SAT: upper bound on x = %d\n"
+            (Option.value_exn (model.value (I 0)))
+      | Unsat ->
+          printf "UNSAT\n"
+    ]}
 *)
 let solve (atoms : atom list) : 'k solution =
   let vars =
@@ -201,38 +177,38 @@ let solve (atoms : atom list) : 'k solution =
 
 (** Propagate MODEL into FORMULA to spit out a new residual [Formula].
 
-    Example:
-{[
-open Smt
-open Smt.Symbol
+    {3 Example}
+    {[
+    open Smt
+    open Smt.Symbol
 
-let symbol = AsciiSymbol.make_int
-let a = symbol 'a' and b = symbol 'b'
-let () =
-  (* (a >= 5) AND (b < a) *)
-  let formula =
-      Formula.And
-      [
-        Binop (Greater_than_eq, Key a, Const_int 5);
-        Binop (Less_than, Key b, Key a);
-      ]
-  in
-  let model = Model.of_local 0 ~lookup:(fun _ uid ->
-    uid
-    |> function
-      | key when Char.to_int 'a' = key -> Some 7
-      | key when Char.to_int 'b' = key -> Some 3
-      | _ -> None
-  )
-  in
+    let symbol = AsciiSymbol.make_int
+    let a = symbol 'a' and b = symbol 'b'
+    let () =
+      (* (a >= 5) AND (b < a) *)
+      let formula =
+          Formula.And
+          [
+            Binop (Greater_than_eq, Key a, Const_int 5);
+            Binop (Less_than, Key b, Key a);
+          ]
+      in
+      let model = Model.of_local 0 ~lookup:(fun _ uid ->
+        uid
+        |> function
+          | key when Char.to_int 'a' = key -> Some 7
+          | key when Char.to_int 'b' = key -> Some 3
+          | _ -> None
+      )
+      in
 
-  let residual = Diff.propagate model formula in
+      let residual = Diff.propagate model formula in
 
-  (* Prints: "Residual formula: ((7 >= 5) ^ (3 < 7))" *)
-  printf "Residual formula: %s\n"
-    (Formula.to_string residual
-       ~key:(fun uid -> Char.to_string (Char.of_int_exn uid)))
-]}
+      (* Prints: "Residual formula: ((7 >= 5) ^ (3 < 7))" *)
+      printf "Residual formula: %s\n"
+        (Formula.to_string residual
+          ~key:(fun uid -> Char.to_string (Char.of_int_exn uid)))
+    ]}
 *)
 let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
   : (bool, 'k) Formula.t =

@@ -13,18 +13,45 @@ let empty : 'k t = { value = (fun _ -> None) }
 (** Combine partial models LEFT and RIGHT using the "most recent model"
     strategy (RIGHT is most recent).
 
-    For example, we could merge resulting models [m] and an accumulator
-    model [acc_model] in an iteration:
+    {3 Example}
     {[
-        List.fold X.logics
-          ~init:(Model.empty, e)
-          ~f:(fun (acc_model, acc_formula) (module L) ->
-            let atoms = L.extract acc_formula in
-            match L.solve atoms with
-            | L.Sat m ->
-              let acc_model' = Model.merge acc_model m in
+    let () =
+      let open Symbol in
+      let a = AsciiSymbol.make_int 'a'
+      and b = AsciiSymbol.make_int 'b'
+      and c = AsciiSymbol.make_int 'c'
+      in
+      let pp_model = Model.to_string ~pp_assignment:(
+        fun (I x) v -> sprintf "  %c => %d" (Char.of_int_exn x) v
+      ) in
+      let left_model = Model.of_local 0 ~lookup:(fun _ uid ->
+        uid
+        |> function
+          | key when Char.to_int 'a' = key -> Some 7
+          | key when Char.to_int 'b' = key -> Some 3
+          | _ -> None
+      ) in
+      let right_model = Model.of_local 0 ~lookup:(fun _ uid ->
+        uid
+        |> function
+          | key when Char.to_int 'a' = key ->
+            (* This overrides 'a' in left_model *)
+            Some (-7)
+          | key when Char.to_int 'b' = key -> Some 3
+          | key when Char.to_int 'c' = key -> Some 10
+          | _ -> None
+      ) in
+      let merged = Model.merge left_model right_model in
+      printf "Merged models: %s\n" (pp_model merged [a; b; c;])
+      (*
+        Merged models: {
+          a => -7
+          b => 3
+          c => 10
+        }
+      *)
+    ;;
     ]}
-    ... in which case, any key conflicts would result in overwriting with values from [m].
 *)
 let merge (left : 'k t) (right : 'k t) : 'k t =
   {
@@ -35,17 +62,37 @@ let merge (left : 'k t) (right : 'k t) : 'k t =
     )
   }
 
-(** Pretty-print SYMBOLS in MODEL. If no assignments are present, returns ["{}"].
+(** Pretty-print SYMBOLS in MODEL. It formats each [symbol] [value] pair using the
+    string returned by PP_ASSIGNMENT, separated by SEP (["\n"] by default).
 
-    Otherwise, it formats each [symbol] [value] pair using the string returned by
-    PP_ASSIGNMENT, separating by SEP which is ["\n"] by default:
+    Otherwise, returns ["{}"].
 
+    {3 Example}
     {[
-    {
-      (pp_assignment s1 v1)
-      (pp_assignment s2 v2)
-      ...
-    }
+    let () =
+      let open Symbol in
+      let a = AsciiSymbol.make_int 'a' and b = AsciiSymbol.make_int 'b'
+      in
+      let model = Model.of_local 0 ~lookup:(fun _ uid ->
+        uid
+        |> function
+          | key when Char.to_int 'a' = key -> Some 7
+          | key when Char.to_int 'b' = key -> Some 3
+          | _ -> None
+      )
+      in
+      let str_repr = Model.to_string model [a; b;] ~pp_assignment:(
+          fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
+      )
+      in
+      printf "Model formatted: %s\n" str_repr;
+      (*
+        Model formatted: {
+          a => 7
+          b => 3
+        }
+      *)
+    ;;
     ]}
 *)
 let to_string
@@ -69,19 +116,37 @@ let to_string
           in
           Printf.sprintf "{%s%s%s}" sep body sep
 
-(** Fold VARS over their value from MODEL into
-    the type from INIT, with F being the fold function.
+(** Fold KEYS over their value from MODEL by calling [F INIT var data].
 
-    For example, we can fold assignments into an [Int.Map]:
-
-    {[let model_unboxed = Model.fold model vars ~init:Int.Map.empty ~f:Map.set]}
+    {3 Example}
+    {[
+    let () =
+      let open Symbol in
+      let a = AsciiSymbol.make_int 'a'
+      and b = AsciiSymbol.make_int 'b'
+      in
+      let get_uid = Utils.Separate.extract in
+      let model = Model.of_local 0 ~lookup:(fun _ uid ->
+        uid
+        |> function
+          | key when Char.to_int 'a' = key -> Some 7
+          | key when Char.to_int 'b' = key -> Some 3
+          | _ -> None
+      ) in
+      Model.fold model ([a; b;] |> List.map ~f:get_uid) ~init:Int.Map.empty ~f:Map.set
+      |> Map.to_alist
+      |> List.to_string ~f:(fun (k, v) -> sprintf "%c=%d" (Char.of_int_exn k) v)
+      |> printf "Folded: %s\n";
+      (* Prints: 'Folded: (a=7 b=3)' *)
+    ;;
+    ]}
 *)
 let fold
   (model : 'k t)
-  (vars : int list)
+  (keys : int list)
   ~(init: 'a)
-  ~(f : 'a -> key : int -> data : int-> 'a) =
-    vars
+  ~(f : 'a -> key : int -> data : int -> 'a) =
+    keys
     |> List.fold ~init ~f:(fun acc x ->
       match model.value (I x) with
       | Some v -> f acc ~key:x ~data:v
@@ -99,12 +164,30 @@ let fold
     It should return an [option] of whatever value LOCAL holds for the
     given [uid].
 
-    Example:
+    {3 Example}
     {[
-      if Queue.is_empty q then
-        Sat (
-          Model.of_local dist ~lookup:Map.find
-        )
+    let () =
+      let int_map = (
+        Int.Map.empty
+        |> Map.add_exn ~key:(Char.to_int 'a') ~data:0
+        |> Map.add_exn ~key:(Char.to_int 'b') ~data:1
+      ) in
+        let pp_model = Model.to_string ~pp_assignment:(
+          fun (I x) v -> sprintf "  %c => %s" (Char.of_int_exn x) (
+            if v = 0 then "hello" else "world"
+          )
+        ) in
+        let model = Model.of_local int_map ~lookup:Map.find in
+        pp_model model [a; b;]
+        |> printf "From local: %s\n";
+        (* 
+          Prints:
+          From local: {
+            a => hello
+            b => world
+          }
+        *)
+    ;;
     ]}
 *)
 let of_local (local : 'a) ~(lookup : 'a -> int -> 'b option): 'k t =

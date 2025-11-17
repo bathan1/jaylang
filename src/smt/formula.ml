@@ -371,25 +371,24 @@ end
     ]}
 *)
 let keys (formula : (bool, 'k) t) : int list =
-  let rec go : type a. int list -> (a, 'k) t -> int list =
+  let rec go :
+    type a. int list -> (a, 'k) t -> int list =
     fun acc f ->
-    match f with
-    | Const_bool _ | Const_int _ -> acc
+      match f with
+      | Const_bool _ | Const_int _ -> acc
 
-    | Key (I x) ->
-      x :: acc
+      | Key (I uid)
+      | Key (B uid) ->
+          uid :: acc
 
-    | Key _ ->
-      acc
+      | Not e ->
+          go acc e
 
-    | Not e ->
-      go acc e
+      | And es ->
+          List.fold es ~init:acc ~f:(fun acc e -> go acc e)
 
-    | And es ->
-      List.fold es ~init:acc ~f:(fun acc e -> go acc e)
-
-    | Binop (_, l, r) ->
-      let acc = go acc l in
-      go acc r
+      | Binop (_, l, r) ->
+          let acc = go acc l in
+          go acc r
   in
   go [] formula

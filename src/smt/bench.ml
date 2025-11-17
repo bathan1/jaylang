@@ -85,7 +85,6 @@ let _ =
   9. (a = 123456) ^ (b = 123456) ^ (not (c = 123456)) ^ (d = 123456)
   10. (a = 123456) ^ (b = 123456) ^ (c = 123456) ^ (d = 123456)"
 
-
 let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
   (* 1 *)
   Binop (Equal, Key a, Const_int 123456);
@@ -151,15 +150,18 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
     Binop (Equal, Key d, Const_int 123456);
   ];
 ]
-
 let () =
   Diff.extract (And [
-    Binop (Equal, Key a, Key b);
-    Binop (Equal, Key c, Key d);
-    Binop (Equal, Const_int 1, Const_int 1);
+    Binop (Less_than_eq, Key a, Key b);
+    Binop (Less_than_eq, Key c, Key d);
   ])
   |> fun ls -> printf "%d\n" (List.length ls)
+  (* Prints: 2 *)
 
 let () =
   exprs
-  |> List.iteri ~f:(fun i expr -> run_hybrid ~i:(i + 1) expr [a; b; c; d; e]; run_backend ~i:(i + 1) expr [a; b; c; d; e;] )
+  |> List.iteri ~f:(
+    fun i expr ->
+      run_hybrid ~i:(i + 1) expr [a; b; c; d; e];
+      run_backend ~i:(i + 1) expr [a; b; c; d; e;]
+  )
