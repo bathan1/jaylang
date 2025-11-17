@@ -43,41 +43,63 @@ type 'k solution =
       (* Prints: 2 *)
     ]}
 *)
-let extract (formula : (bool, 'k) Formula.t) : atom list =
+let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   formula
   |> function
+    (* x = c -> (x - y <= c) and (0 - x) <= -c *)
+  | Binop (Equal, Key I x, Const_int c)
+  | Binop (Equal, Const_int c, Key I x) ->
+    [ { x; y = 0; c; };
+      {x = 0; y = x; c = -c } ]
+
+    (* x = y -> (x - y) <= 0 and (y - x) <= 0*)
+  | Binop (Equal, Key I x, Key I y) ->
+    [ { x; y; c = 0 };
+      { x = y; y = x; c = 0 } ]
+
+    (* x <= y -> (x - y <= 0)
+        y >= x -> (x - y <= 0)
+        not (x > y) -> x <= y -> (x - y) <= 0 *)
+  | Binop (Less_than_eq, Key I x, Key I y)
+  | Binop (Greater_than_eq, Key I y, Key I x)
+  | Not Binop (Less_than, Key I y, Key I x)
+  | Not Binop (Greater_than, Key I x, Key I y) ->
+    [{ x; y; c = 0 }]
+
+    (* x <= c -> (x - 0) <= c 
+        c >= x -> (x - 0) <= c
+        not (x > c) -> x <= c -> (x - 0) <= c *)
+  | Binop (Less_than_eq, Key I x, Const_int c)
+  | Binop (Greater_than_eq, Const_int c, Key I x)
+  | Not Binop (Less_than, Const_int c, Key I x)
+  | Not Binop (Greater_than, Key I x, Const_int c) ->
+    [{ x; y = 0; c }]
+
+    (* x < c -> x - 0 <= c - 1 *)
+  | Binop (Less_than, Key I x, Const_int c)
+  | Binop (Greater_than, Const_int c, Key I x) 
+  | Not Binop (Less_than_eq, Const_int c, Key I x)
+  | Not Binop (Greater_than_eq, Key I x, Const_int c) ->
+    [{ x; y = 0; c = c - 1 }]
+
+    (* x >= c -> 0 - x <= -c
+       not (x < c) -> x >= c -> (0 - x) <= -c *)
+  | Binop (Greater_than_eq, Key I x, Const_int c)
+  | Binop (Less_than_eq, Const_int c, Key I x)
+  | Not Binop (Greater_than, Const_int c, Key I x)
+  | Not Binop (Less_than, Key I x, Const_int c) ->
+    [ {x = 0; y = x; c = -c}  ]
+
+  (* x > c -> (0 - x) <= -(c + 1) *)
+  | Binop (Greater_than, Key I x, Const_int c)
+  | Binop (Less_than, Const_int c, Key I x)
+  | Not Binop (Greater_than_eq, Const_int c, Key I x)
+  | Not Binop (Less_than_eq, Key I x, Const_int c) ->
+    [{ x = 0; y = x; c = -(c + 1) }]
+
   | Formula.And exprs ->
     exprs
-    |> List.map ~f:(
-      function
-      | Formula.Not Formula.Binop (Greater_than, Key (I x), Key (I y))
-      | Formula.Binop (Less_than_eq, Key (I x), Key (I y)) ->
-        [{ x; y; c = 0 }]
-
-      | Formula.Not Formula.Binop (Greater_than, Key (I x), Const_int c)
-      | Formula.Binop (Less_than_eq, Key (I x), Const_int c)
-      | Formula.Binop (Greater_than, Const_int c, Key (I x)) ->
-        [{ x; y = 0; c }]
-
-      | Formula.Binop (Equal, Key (I x), Key (I y)) ->
-        [ { x; y; c = 0 };
-          { x = y; y = x; c = 0 } ]
-
-      | Formula.Binop (Equal, Key (I x), Const_int c)
-        | Formula.Binop (Equal, Const_int c, Key (I x)) ->
-        [ { x; y = 0; c; };
-          {x = 0; y = x; c = -c } ]
-
-      | Formula.Not Formula.Binop (Less_than, Key (I x), Key (I y))
-      | Formula.Binop (Greater_than_eq, Key (I x), Key (I y)) ->
-        [ { x = y; y = x; c = 0 } ]
-
-      | Formula.Not Formula.Binop (Less_than, (Key I x), Const_int c)
-      | Formula.Binop (Greater_than_eq, Key (I x), Const_int c)
-      | Formula.Binop (Greater_than_eq, Const_int c, Key (I x)) ->
-        [ {x = 0; y = x; c = -c}  ]
-
-      | _ -> [])
+    |> List.map ~f:extract
     |> List.concat
   | _ -> []
 ;;
