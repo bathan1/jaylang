@@ -29,7 +29,7 @@ type 'k solution =
   | Sat of 'k Model.t
   | Unsat
 
-(** Transforms FORMULA into atoms if FORMULA is an [Formula.And].
+(** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
 
     From each [And] list element, we handle exactly 3 binary operations:
@@ -53,7 +53,7 @@ type 'k solution =
         {- x ≥ y becomes y − x ≤ 0 }
         {- x ≥ c becomes 0 − x ≤ −c }
     }
-    Any other [Formula] type is ignored.
+    Any other {!Formula.t} type is ignored.
 
     Example:
 {[
