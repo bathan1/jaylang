@@ -24,3 +24,15 @@ module Make (Key : KEY) = struct
   let make_int (k : Key.t) : int t = T.make_int k Key.uid
   let make_bool (k : Key.t) : bool t = T.make_bool k Key.uid
 end
+
+(** [Symbol] instance that maps [char] to [t].
+    Meant to act as a reference call to [Make] and for
+    manual debugging.
+
+    You probably don't want to use this for any automated
+    Formula generation since it only encodes ASCII.
+*)
+module AsciiSymbol = Make (struct
+  type t = char
+  let uid = Stdlib.Char.code
+end)

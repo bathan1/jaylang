@@ -1,6 +1,12 @@
 open Core
 open Overlays
 open Smt
+open Smt.Symbol
+
+let symbol = AsciiSymbol.make_int
+let a = symbol 'a' and b = symbol 'b'
+and c = symbol 'c' and d = symbol 'd'
+and e = symbol 'e'
 
 module Backend_z3 = Formula.Make_solver(Typed_z3)
 
@@ -11,18 +17,18 @@ module Hybrid_z3 = Formula.Make_solver (struct
   ]
 end)
 
-module AsciiSymbol = Smt.Symbol.Make (struct
-  type t = char
-
-  let uid = Stdlib.Char.code
-end)
-
-let run_hybrid expr (vars : int AsciiSymbol.t list) ~i =
+let run_hybrid expr (vars : _ AsciiSymbol.t list) ~i =
   let start_time = Time_ns.now () in
   printf "(%d) Hybrid solve on: %s\n"
     i
-    (Formula.to_string expr ~key:(fun uid _is_bool ->
-       uid |> Char.of_int_exn |> Char.to_string));
+    (
+      Formula.to_string expr ~key:(
+        fun uid -> (
+          uid
+          |> Char.of_int_exn
+          |> Char.to_string
+        )
+    ));
 
   let result = Hybrid_z3.solve [expr] in
 
@@ -46,7 +52,7 @@ let run_backend expr (vars : int AsciiSymbol.t list) ~i =
 
   printf "(%d) Backend solve on: %s\n"
     i
-    (Formula.to_string expr ~key:(fun uid _is_bool ->
+    (Formula.to_string expr ~key:(fun uid ->
        uid |> Char.of_int_exn |> Char.to_string));
 
   let result = Backend_z3.solve [expr] in
@@ -79,10 +85,6 @@ let _ =
   9. (a = 123456) ^ (b = 123456) ^ (not (c = 123456)) ^ (d = 123456)
   10. (a = 123456) ^ (b = 123456) ^ (c = 123456) ^ (d = 123456)"
 
-let symbol = AsciiSymbol.make_int
-let a = symbol 'a' and b = symbol 'b'
-and c = symbol 'c' and d = symbol 'd'
-and e = symbol 'e'
 
 let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
   (* 1 *)
@@ -149,6 +151,14 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
     Binop (Equal, Key d, Const_int 123456);
   ];
 ]
+
+let () =
+  Diff.extract (And [
+    Binop (Equal, Key a, Key b);
+    Binop (Equal, Key c, Key d);
+    Binop (Equal, Const_int 1, Const_int 1);
+  ])
+  |> fun ls -> printf "%d\n" (List.length ls)
 
 let () =
   exprs

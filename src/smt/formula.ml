@@ -27,15 +27,14 @@ type (_, 'k) t =
   | And : (bool, 'k) t list -> (bool, 'k) t
   | Binop : ('a * 'a * 'b) Binop.t * ('a, 'k) t * ('a, 'k) t -> ('b, 'k) t
 
+(** Encapsulates {i subsets} of theories for simple
+    expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}. *)
 module type LOGIC = sig
-  (** Encapsulates {i specific} subsets of theories for very simple
-      expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}. *)
-
-  (** Whatever type the logic works with, which can be anything. *)
+  (** Whatever type the logic works with. *)
   type atom
 
   (** The frontend only works with {b DECIDABLE} logics,
-      so we don't need to handle Unknowns. *)
+      so there are no Unknown solutions. *)
   type 'k solution =
     | Sat of 'k Model.t
     | Unsat
@@ -50,14 +49,57 @@ module type LOGIC = sig
   val propagate : 'k Model.t -> (bool, 'k) t -> (bool, 'k) t
 end
 
+(** An adapter type for calling an SMT solver backend.
+
+    You can bind a [LOGIC] list of modules to LOGICS in order
+    to preprocess (and hopefully outright solve) future
+    calls to SOLVE [[ t ]].
+  
+    For example, {!Overlays.Typed_z3} can be used as an argument to {!Make_solver}:
+{[
+module Backend_z3 = Formula.Make_solver(Typed_z3)
+let result = Backend_z3.solve [
+  And [
+    Binop (Equal, Key a, Const_int 123456);
+    Binop (Equal, Key b, Const_int 123456);
+    Binop (Equal, Key c, Const_int 123456);
+    Binop (Equal, Key d, Const_int 123456);
+  ];
+]
+]}
+*)
 module type SOLVABLE = sig
-  (** An 'adapter' for calling a solver backend in plain OCaml. *)
   include S
+
   (** List of logics the solver should process prior to
-      calling the backend solve. *)
+      calling the backend solve.
+
+      For example, to preprocess with IDL reasoning using the
+      [Diff] module:
+{[
+module MySolvable = struct
+  include Overlays.Typed_z3
+  let logics : (module Formula.LOGIC) list = [
+    (module Diff)
+  ]
+end
+]}
+  *)
   val logics : (module LOGIC) list
 
-  (** Searches for a satisfying model of the {i conjunction} of EXPRS. *)
+  (** Searches for a satisfying model of the {i conjunction} of EXPRS.
+
+      Example:
+{[
+let expr = And [
+  Binop (Equal, Key a, Const_int 123456);
+  Not (Binop (Equal, Key b, Const_int 123456));
+  Binop (Equal, Key c, Const_int 123456);
+  Binop (Equal, Key d, Const_int 123456);
+]
+let result = MySolvable.solve [expr]
+]}
+  *)
   val solve : (bool, 'k) t list -> 'k Solution.t
 end
 
@@ -195,21 +237,38 @@ type 'k solver = (bool, 'k) t list -> 'k Solution.t
 
 (** Pretty prints FORMULA, with optional KEY function.
 
-    Key function is passed uid, then a bool flag that indicates if it
-    is a bool key or an int key. *)
-let rec to_string : type a k. ?key:(int -> bool -> string) -> (a, k) t -> string =
+    Key function is passed the [uid] of the Key and is asked to
+    turn that into a meaningful string.
+
+    For example, if [uid]s were encoded as ASCII codes for keys 'a', 'b', 'c', 'd',
+    we could decode that to a [string]:
+    {[
+      printf "(%d) Hybrid solve on: %s\n"
+        i
+        (
+          Formula.to_string expr ~key:(
+            fun uid -> (
+              uid
+              |> Char.of_int_exn
+              |> Char.to_string
+            )
+        ));
+    ]}
+    The log would look something like:
+    {[
+    Hybrid solve on: ((a = 123456) ^ (b = 123456) ^ (not (c = 123456)) ^ (d = 123456))
+    ]}
+*)
+let rec to_string : type a k. ?key:(int -> string) -> (a, k) t -> string =
   fun
-    ?(key=fun uid is_bool -> (
-      sprintf "<%s#%d>" (if is_bool then "BoolKey" else "IntKey") uid
+    ?(key=fun uid -> (
+      sprintf "<Key#%d>" uid
     )) formula ->
   match formula with
   | Const_int i -> Int.to_string i
   | Const_bool b -> Bool.to_string b
-  | Key s -> (
-    match s with
-    | I uid -> key uid false
-    | B uid -> key uid true
-  )
+  | Key (I uid)
+  | Key (B uid) -> key uid
   | Not e ->
     sprintf "(not %s)" (to_string e ~key)
   | And es ->
@@ -260,7 +319,8 @@ module Make_solver (X : SOLVABLE) = struct
 
       We assume calling [X.solve] is expensive, so this attempts to reduce EXPRS to a [Const_bool].
 
-      If it can't reduce into a [Const_bool], then it calls [X.solve] on the {i reduced conjunction}. *)
+      If it can't reduce into a [Const_bool], then it calls [X.solve] on the {i reduced conjunction}.
+*)
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
     exprs
     |> and_
@@ -277,20 +337,22 @@ module Make_solver (X : SOLVABLE) = struct
             | L.Unsat ->
               (acc_model, Const_bool false)
 
-            | L.Sat m ->
-              let acc_model' = Model.merge acc_model m in
-              let residual = L.propagate m acc_formula in
+            | L.Sat model ->
+              let acc_model' = Model.merge acc_model model in
+              let residual = L.propagate model acc_formula in
               (acc_model', residual)
           )
       in
-      printf "Simplified: %s\n" (to_string simplified ~key:(fun uid _ -> Char.of_int_exn uid |> Char.to_string));
+      printf "Simplified: %s\n" (to_string simplified ~key:(fun uid -> (
+        Char.of_int_exn uid |> Char.to_string)
+      ));
       match evaluate simplified with
       | Const_bool false -> Solution.Unsat
       | Const_bool true  ->
         printf "HIT early-solve\n";
         Solution.Sat partial_model
       | e'' ->
-        printf "MISS early-solve, deferring to backend: %s\n" (to_string simplified ~key:(fun uid _ -> Char.of_int_exn uid |> Char.to_string));
+        printf "MISS early-solve, deferring to backend: %s\n" (to_string simplified ~key:(fun uid -> Char.of_int_exn uid |> Char.to_string));
         (* backend solver *)
         let backend_solution = X.solve [ M.transform e'' ] in
         match backend_solution with
@@ -299,7 +361,15 @@ module Make_solver (X : SOLVABLE) = struct
         | other -> other
 end
 
-(** Get the uids of all the keys in FORMULA. *)
+(** Get the uids of all the keys in FORMULA.
+
+    For example:
+    {[
+      let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
+        : (bool, 'k) Formula.t =
+        let vars = Formula.keys formula in
+    ]}
+*)
 let keys (formula : (bool, 'k) t) : int list =
   let rec go : type a. int list -> (a, 'k) t -> int list =
     fun acc f ->

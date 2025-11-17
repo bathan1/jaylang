@@ -53,7 +53,20 @@ type 'k solution =
         {- x ≥ y becomes y − x ≤ 0 }
         {- x ≥ c becomes 0 − x ≤ −c }
     }
-    Any other [Formula] type is ignored. *)
+    Any other [Formula] type is ignored.
+
+    Example:
+{[
+let () =
+  Diff.extract (And [
+    Binop (Equal, Key a, Key b);
+    Binop (Equal, Key c, Key d);
+    Binop (Equal, Const_int 1, Const_int 1);
+  ])
+  |> fun ls -> printf "%d\n" (List.length ls)
+  (* Prints: 4 *)
+]}
+*)
 let extract (formula : (bool, 'k) Formula.t) : atom list =
   formula
   |> function
@@ -93,22 +106,26 @@ let extract (formula : (bool, 'k) Formula.t) : atom list =
   | _ -> []
 ;;
 
-let to_global_model (dist : int Int.Map.t) : 'k Model.t =
-  {
-    Model.value =
-      (fun (type a) (sym : (a,'k) Symbol.t) ->
-        match sym with
-        | I x ->
-          Option.map (Map.find dist x) ~f:(fun v ->
-            (Obj.magic v : a)
-          )
-        | B _ ->
-          None
-      )
-  };;
-
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
-    This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases). *)
+    This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases).
+
+    Example:
+{[
+let () =
+  let atoms = [
+    Diff.atom ~x:0 ~y:1 ~c:3;   (* x - y <= 3 *)
+    Diff.atom ~x:1 ~y:Const ~c:10;  (* y <= 10 *)
+  ] in
+
+  match solve atoms with
+  | Sat model ->
+      (* Access a bound: model.value (I 0) -> int option *)
+      printf "SAT: upper bound on x = %d\n"
+        (Option.value_exn (model.value (I 0)))
+  | Unsat ->
+      printf "UNSAT\n"
+]}
+*)
 let solve (atoms : atom list) : 'k solution =
   let vars =
     List.fold atoms ~init:Int.Set.empty ~f:(fun acc {x; y; _} ->
@@ -141,9 +158,7 @@ let solve (atoms : atom list) : 'k solution =
   let rec loop dist =
     if Queue.is_empty q then
       Sat (
-        Model.of_local dist ~lookup:(
-          fun loc key _is_bool -> Map.find loc key
-        )
+        Model.of_local dist ~lookup:Map.find
       )
     else begin
       let u = Queue.dequeue_exn q in
@@ -184,13 +199,45 @@ let solve (atoms : atom list) : 'k solution =
   loop dist
 ;;
 
-(** Propagate MODEL into FORMULA to spit out a new residual [Formula]. *)
+(** Propagate MODEL into FORMULA to spit out a new residual [Formula].
+
+    Example:
+{[
+open Smt
+open Smt.Symbol
+
+let symbol = AsciiSymbol.make_int
+let a = symbol 'a' and b = symbol 'b'
+let () =
+  (* (a >= 5) AND (b < a) *)
+  let formula =
+      Formula.And
+      [
+        Binop (Greater_than_eq, Key a, Const_int 5);
+        Binop (Less_than, Key b, Key a);
+      ]
+  in
+  let model = Model.of_local 0 ~lookup:(fun _ uid ->
+    uid
+    |> function
+      | key when Char.to_int 'a' = key -> Some 7
+      | key when Char.to_int 'b' = key -> Some 3
+      | _ -> None
+  )
+  in
+
+  let residual = Diff.propagate model formula in
+
+  (* Prints: "Residual formula: ((7 >= 5) ^ (3 < 7))" *)
+  printf "Residual formula: %s\n"
+    (Formula.to_string residual
+       ~key:(fun uid -> Char.to_string (Char.of_int_exn uid)))
+]}
+*)
 let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
   : (bool, 'k) Formula.t =
   let vars = Formula.keys formula in
-  let model_unboxed = Model.fold model vars 
-    ~init:(Int.Map.empty) 
-    ~f:(fun acc key data -> Map.set acc ~key ~data)
+  let model_unboxed = Model.fold model vars ~init:Int.Map.empty ~f:Map.set
   in
   let rec aux : type a. (a,'k) Formula.t -> (a,'k) Formula.t = fun f ->
     match f with

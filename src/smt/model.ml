@@ -1,16 +1,32 @@
 open Core
 
-(** A generic map type of symbols FROM namespace ['k] TO assignments of type ['a]. *)
+(** Generic map-like type of symbols FROM namespace ['k] TO assignments
+    of type ['a].
+*)
 type 'k t = {
   (** Lookup the value of SYMBOL, if Some exists. *)
   value : 'a. ('a, 'k) Symbol.t -> 'a option;
 }
 
-(** Lookup calls will just return [None] *)
+(** Lookup calls will just return [None]. *)
 let empty : 'k t = { value = (fun _ -> None) }
 
 (** Combine partial models LEFT and RIGHT using the "most recent model"
-    strategy (RIGHT is most recent). *)
+    strategy (RIGHT is most recent).
+
+    For example, we could merge resulting models [m] and an accumulator
+    model [acc_model] in an iteration:
+    {[
+        List.fold X.logics
+          ~init:(Model.empty, e)
+          ~f:(fun (acc_model, acc_formula) (module L) ->
+            let atoms = L.extract acc_formula in
+            match L.solve atoms with
+            | L.Sat m ->
+              let acc_model' = Model.merge acc_model m in
+    ]}
+    ... in which case, any key conflicts would result in overwriting with values from [m].
+*)
 let merge (left : 'k t) (right : 'k t) : 'k t =
   {
     value = fun (type a) (symbol : (a, 'k) Symbol.t) -> (
@@ -59,51 +75,50 @@ let to_string
 
     For example, we can fold assignments into an [Int.Map]:
 
-    {[
-    let model_unboxed = Model.fold model vars 
-      ~init:(Int.Map.empty) 
-      ~f:(fun acc key data -> Map.set acc ~key ~data)
-    ]}
+    {[let model_unboxed = Model.fold model vars ~init:Int.Map.empty ~f:Map.set]}
 *)
 let fold
   (model : 'k t)
   (vars : int list)
-  ~(init: 'a) 
-  ~(f : 'a -> int -> int -> 'a) =
+  ~(init: 'a)
+  ~(f : 'a -> key : int -> data : int-> 'a) =
     vars
     |> List.fold ~init ~f:(fun acc x ->
       match model.value (I x) with
-      | Some v -> f acc x v
+      | Some v -> f acc ~key:x ~data:v
       | None -> acc
     )
 
-(** "Cast" LOCAL into type [Model.t] by wrapping [Model.value]
+(** Cast LOCAL into type [Model.t] by wrapping [Model.value]
     calls with the LOOKUP callback.
 
-    LOOKUP is passed in arguments LOCAL, the symbol's int id,
-    and a bool flag indicating if this is a boolean key or not.
+    LOOKUP is passed in arguments
+    {ol
+      {- [local]: A reference to passed LOCAL argument. }
+      {- [uid]: The [int] uid of the [Symbol] to lookup. }
+    }
+    It should return an [option] of whatever value LOCAL holds for the
+    given [uid].
 
-    Example usage from [Diff.solve]:
+    For example, we can cast an [Int.Map] to a model [t] by
     {[
       if Queue.is_empty q then
         Sat (
-          Model.of_local dist ~lookup:(
-            fun loc key _is_bool -> Map.find loc key
-          )
+          Model.of_local dist ~lookup:Map.find
         )
     ]}
-    *)
-let of_local (local : 'a) ~(lookup : 'a -> int -> bool -> 'b option): 'k t =
+*)
+let of_local (local : 'a) ~(lookup : 'a -> int -> 'b option): 'k t =
   {
     value =
       (fun (type a) (sym : (a,'k) Symbol.t) ->
         match sym with
         | I x ->
-          Option.map (lookup local x false) ~f:(fun v ->
+          Option.map (lookup local x) ~f:(fun v ->
             (Obj.magic v : a)
           )
         | B x ->
-          Option.map (lookup local x true) ~f:(fun v ->
+          Option.map (lookup local x) ~f:(fun v ->
             (Obj.magic v : a)
           )
       )
