@@ -149,6 +149,12 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
     Binop (Equal, Key c, Const_int 123456);
     Binop (Equal, Key d, Const_int 123456);
   ];
+
+  And [
+    Binop (Less_than_eq, Key a, Const_int 123456);
+    Not (Binop (Equal, Key a, Const_int 123456));
+    Binop (Less_than_eq, Key b, Const_int 123456);
+  ];
 ]
 let () =
   Diff.extract (And [
