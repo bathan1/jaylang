@@ -312,6 +312,96 @@ let rec evaluate : type a k. (a, k) t -> (a, k) t = function
       let e2' = evaluate e2 in
       binop op e1' e2'
 
+(** Get the uids of all the keys in FORMULA.
+
+    For example:
+    {[
+      let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
+        : (bool, 'k) Formula.t =
+        let vars = Formula.keys formula in
+    ]}
+*)
+let keys (formula : (bool, 'k) t) : int list =
+  let rec go :
+    type a. int list -> (a, 'k) t -> int list =
+    fun acc f ->
+      match f with
+      | Const_bool _ | Const_int _ -> acc
+
+      | Key (I uid)
+      | Key (B uid) ->
+          uid :: acc
+
+      | Not e ->
+          go acc e
+
+      | And es ->
+          List.fold es ~init:acc ~f:(fun acc e -> go acc e)
+
+      | Binop (_, l, r) ->
+          let acc = go acc l in
+          go acc r
+  in
+  go [] formula
+
+open Utils
+let partition (and_expr : (bool, 'k) t) : (bool, 'k) t =
+  let exprs = (match and_expr with
+  | And ls -> ls
+  | _ -> []) in
+  if List.is_empty exprs then
+    and_expr
+  else
+  let symbols = keys and_expr in
+  let sorted = Stdlib.List.sort_uniq Int.compare symbols in
+  let index_to_symbol = Array.of_list sorted in
+  let n = Array.length index_to_symbol in
+  let symbol_to_index = Hashtbl.of_alist_exn (module Int) (
+    List.of_array (
+      Array.mapi index_to_symbol ~f:(fun i uid -> uid, i)
+    )
+  ) in
+  let union_in_atom uf atom =
+    match atom with
+    | Binop (_, Key (I x), Key (I y)) ->
+        let ix = Hashtbl.find_exn symbol_to_index x in
+        let iy = Hashtbl.find_exn symbol_to_index y in
+        ignore (Uf.union uf ix iy)
+    | _ -> ()
+  in
+  let uf = Uf.make n in
+  List.iter exprs ~f:(fun f -> union_in_atom uf f);
+  let buckets = Array.init n ~f:(fun _ -> ref []) in
+
+  let rec keys_of_atom acc = function
+    | Binop (_, Key (I x), Key (I y)) -> x :: y :: acc
+    | Binop (_, Key (I x), _) -> x :: acc
+    | Binop (_, _, Key (I y)) -> y :: acc
+    | Not e -> keys_of_atom acc e
+    | And es -> List.fold es ~init:acc ~f:keys_of_atom
+    | _ -> acc
+  in
+
+  List.iter exprs ~f:(fun atom ->
+    match keys_of_atom [] atom with
+    | [] -> ()
+    | uid :: _ ->
+        let idx = Hashtbl.find_exn symbol_to_index uid in
+        let root = Uf.find uf idx in
+        buckets.(root) := atom :: !(buckets.(root))
+  );
+
+  let components = Array.fold buckets ~init:[] ~f:(fun acc atoms_ref ->
+    match !(atoms_ref) with
+    | [] -> acc
+    | atoms -> 
+      (* Reverse to retain left-to-right ordering in EXPR *)
+      (And (List.rev atoms)) :: acc
+  ) in
+
+  And (List.rev components)
+;;
+
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
@@ -320,7 +410,7 @@ module Make_solver (X : SOLVABLE) = struct
       We assume calling [X.solve] is expensive, so this attempts to reduce EXPRS to a [Const_bool].
 
       If it can't reduce into a [Const_bool], then it calls [X.solve] on the {i reduced conjunction}.
-*)
+  *)
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
     exprs
     |> and_
@@ -328,6 +418,8 @@ module Make_solver (X : SOLVABLE) = struct
     | Const_bool true -> Solution.Sat Model.empty
     | Const_bool false -> Solution.Unsat
     | e ->
+      let partitioned = partition e in
+      printf "partitioned=%s\n" (to_string ~key:(fun uid -> Char.of_int_exn uid |> Char.to_string) partitioned);
       let (partial_model, simplified) =
         List.fold X.logics
           ~init:(Model.empty, e)
@@ -361,34 +453,3 @@ module Make_solver (X : SOLVABLE) = struct
         | other -> other
 end
 
-(** Get the uids of all the keys in FORMULA.
-
-    For example:
-    {[
-      let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
-        : (bool, 'k) Formula.t =
-        let vars = Formula.keys formula in
-    ]}
-*)
-let keys (formula : (bool, 'k) t) : int list =
-  let rec go :
-    type a. int list -> (a, 'k) t -> int list =
-    fun acc f ->
-      match f with
-      | Const_bool _ | Const_int _ -> acc
-
-      | Key (I uid)
-      | Key (B uid) ->
-          uid :: acc
-
-      | Not e ->
-          go acc e
-
-      | And es ->
-          List.fold es ~init:acc ~f:(fun acc e -> go acc e)
-
-      | Binop (_, l, r) ->
-          let acc = go acc l in
-          go acc r
-  in
-  go [] formula
