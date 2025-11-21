@@ -33,17 +33,11 @@ module type LOGIC = sig
   (** Whatever type the logic works with. *)
   type atom
 
-  (** The frontend only works with {b DECIDABLE} logics,
-      so there are no Unknown solutions. *)
-  type 'k solution =
-    | Sat of 'k Model.t
-    | Unsat
-
   (** Transform FORMULA into a list of atoms to pass into [solve]. *)
   val extract : (bool, 'k) t -> atom list
 
   (** Search for a satisfying model of ATOMS, if some exists. *)
-  val solve : atom list -> 'k solution
+  val solve : atom list -> 'k Solution.t
 
   (** Rewrite FORMULA based on given MODEL. *)
   val propagate : 'k Model.t -> (bool, 'k) t -> (bool, 'k) t
@@ -394,7 +388,7 @@ let partition (and_expr : (bool, 'k) t) : (bool, 'k) t =
   let components = Array.fold buckets ~init:[] ~f:(fun acc atoms_ref ->
     match !(atoms_ref) with
     | [] -> acc
-    | atoms -> 
+    | atoms ->
       (* Reverse to retain left-to-right ordering in EXPR *)
       (And (List.rev atoms)) :: acc
   ) in
@@ -426,10 +420,11 @@ module Make_solver (X : SOLVABLE) = struct
           ~f:(fun (acc_model, acc_formula) (module L) ->
             let atoms = L.extract acc_formula in
             match L.solve atoms with
-            | L.Unsat ->
+            | Unsat ->
               (acc_model, Const_bool false)
-
-            | L.Sat model ->
+            | Unknown ->
+              (acc_model, acc_formula)
+            | Sat model ->
               let acc_model' = Model.merge acc_model model in
               let residual = L.propagate model acc_formula in
               (acc_model', residual)

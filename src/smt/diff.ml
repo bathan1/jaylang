@@ -24,11 +24,6 @@ type atom = {
   c : int;
 };;
 
-(** variable -> (tightest) upper bound *)
-type 'k solution =
-  | Sat of 'k Model.t
-  | Unsat
-
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
 
@@ -66,7 +61,7 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Not Binop (Greater_than, Key I x, Key I y) ->
     [{ x; y; c = 0 }]
 
-    (* x <= c -> (x - 0) <= c 
+    (* x <= c -> (x - 0) <= c
         c >= x -> (x - 0) <= c
         not (x > c) -> x <= c -> (x - 0) <= c *)
   | Binop (Less_than_eq, Key I x, Const_int c)
@@ -77,7 +72,7 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
 
     (* x < c -> x - 0 <= c - 1 *)
   | Binop (Less_than, Key I x, Const_int c)
-  | Binop (Greater_than, Const_int c, Key I x) 
+  | Binop (Greater_than, Const_int c, Key I x)
   | Not Binop (Less_than_eq, Const_int c, Key I x)
   | Not Binop (Greater_than_eq, Key I x, Const_int c) ->
     [{ x; y = 0; c = c - 1 }]
@@ -124,7 +119,7 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
           printf "UNSAT\n"
     ]}
 *)
-let solve (atoms : atom list) : 'k solution =
+let solve (atoms : atom list) : 'k Solution.t =
   let vars =
     List.fold atoms ~init:Int.Set.empty ~f:(fun acc {x; y; _} ->
       Set.add (Set.add acc x) y)
@@ -155,7 +150,7 @@ let solve (atoms : atom list) : 'k solution =
   );
   let rec loop dist =
     if Queue.is_empty q then
-      Sat (
+      Solution.Sat (
         Model.of_local dist ~lookup:Map.find
       )
     else begin
