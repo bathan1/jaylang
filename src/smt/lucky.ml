@@ -3,12 +3,25 @@
 
    ...
 
-   Given some conjunctive formula F, with variables
-   x1, x2, ..., xn. [Lucky] will attempt to make a
-   guess on a SAT assignment
-   *)
+   Keeping It Stupid Simple since '25
+*)
 
-(** Static config variable that sets the max number of 
+open Core
+
+(** Static config variable that sets the max number of
     attempts {!Lucky.solve} can make.
 *)
-let __TRY_COUNT__ = 1
+let __GUESS_COUNT__ = 2
+
+type 'k atom = {
+  key : int;
+  neqs : int list;
+}
+
+let bounce (center : int) (i : int) : int =
+  let k = (i / 2) + 1 in
+  if i mod 2 = 0 then
+    center + k
+  else
+    center - k
+
