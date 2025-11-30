@@ -1,0 +1,9 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jaylang",
+  "compatibility_date": "2025-06-03",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./vitepress/dist"
+  }
+}

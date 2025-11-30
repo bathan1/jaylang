@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
     title: "Bluejay",
-    srcDir: resolve(__dirname, '../../docs'),
+    srcDir: resolve(__dirname, '../docs'),
     base: "/",
     description: "Next level type safety",
     themeConfig: {
@@ -45,5 +45,14 @@ export default defineConfig({
         socialLinks: [
             { icon: 'github', link: 'https://github.com/vuejs/vitepress' }
         ]
-    }
+    },
+    vite: {
+    resolve: {
+      alias: {
+        "vue/server-renderer": import.meta.resolve(
+          "vue/server-renderer",
+        ),
+      },
+    },
+  }
 })
