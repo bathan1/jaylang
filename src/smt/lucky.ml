@@ -13,9 +13,9 @@ open Core
 *)
 let __GUESS_COUNT__ = 2
 
-type 'k atom = {
+type atom = {
   key : int;
-  neqs : int list;
+  neqs : Int.Set.t
 }
 
 let bounce (center : int) (i : int) : int =
