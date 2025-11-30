@@ -237,6 +237,7 @@ let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
     | Const_bool _ -> f
     | Const_int _ -> f
 
+    | Not (Binop (Equal, _, _)) -> f
     | Not e ->
       let e' = aux e in
       Not e'
@@ -245,6 +246,7 @@ let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
       let es' = List.map es ~f:aux in
       And es'
 
+    | Binop (Not_equal, _, _) -> f
     | Binop (op, l, r) ->
       let l' = aux l in
       let r' = aux r in

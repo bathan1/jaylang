@@ -39,7 +39,7 @@ module type LOGIC = sig
   (** Search for a satisfying model of ATOMS, if some exists. *)
   val solve : atom list -> 'k Solution.t
 
-  (** Rewrite FORMULA based on given MODEL. *)
+  (** Rewrite FORMULA given MODEL. *)
   val propagate : 'k Model.t -> (bool, 'k) t -> (bool, 'k) t
 end
 
@@ -331,7 +331,6 @@ let keys (formula : (bool, 'k) t) : int list =
 
       | And es ->
           List.fold es ~init:acc ~f:(fun acc e -> go acc e)
-
       | Binop (_, l, r) ->
           let acc = go acc l in
           go acc r
@@ -396,6 +395,30 @@ let partition (and_expr : (bool, 'k) t) : (bool, 'k) t =
   And (List.rev components)
 ;;
 
+let bools (formula : (bool, 'k) t) : Int.Set.t Int.Map.t =
+  let get_set map key =
+    match Map.find map key with
+    | Some ls -> ls
+    | _ -> Int.Set.empty
+  in
+  formula
+  |> function
+    | And ls -> (
+        List.fold ls ~init:(Int.Map.empty : Int.Set.t Int.Map.t) ~f:(fun acc f -> (
+          match f with
+          | Binop (Not_equal, Key I x, Const_int c)
+          | Binop (Not_equal, Const_int c, Key I x)
+          | Not (Binop (Equal, Key I x, Const_int c))
+          | Not (Binop (Equal, Const_int c, Key I x)) ->
+            let set = get_set acc x in
+            let next = Set.add set c in
+            Map.set acc ~key:x ~data:next
+          | _ -> acc
+        ))
+      )
+    | _ -> Int.Map.empty
+;;
+
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
@@ -412,8 +435,6 @@ module Make_solver (X : SOLVABLE) = struct
     | Const_bool true -> Solution.Sat Model.empty
     | Const_bool false -> Solution.Unsat
     | e ->
-      let partitioned = partition e in
-      printf "partitioned=%s\n" (to_string ~key:(fun uid -> Char.of_int_exn uid |> Char.to_string) partitioned);
       let (partial_model, simplified) =
         List.fold X.logics
           ~init:(Model.empty, e)
@@ -430,9 +451,11 @@ module Make_solver (X : SOLVABLE) = struct
               (acc_model', residual)
           )
       in
+
       printf "Simplified: %s\n" (to_string simplified ~key:(fun uid -> (
         Char.of_int_exn uid |> Char.to_string)
       ));
+
       match evaluate simplified with
       | Const_bool false -> Solution.Unsat
       | Const_bool true  ->
