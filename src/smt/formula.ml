@@ -30,56 +30,117 @@ type (_, 'k) t =
 (** Splits [(bool, 'k) t] FORMULA into 2 cases that are each
     {i potentially} satisfiable. Split functions are what make
     {b non-convex} theories usable by the solver.
+
+    {2 Splitting on Disequalities (aka. {!Splits.lucky_guess})}
+    {[
+    let lucky_guess : 'k Formula.split_fn = function
+      | Not (Binop (Equal, Key I l, Const_int r))
+        | Not (Binop (Equal, Const_int r, Key I l))
+        | Binop (Not_equal, Key I l, Const_int r)
+        | Binop (Not_equal, Const_int r, Key I l) ->
+        Some (
+          Binop (Less_than, Key (I l), Const_int r),
+          Binop (Greater_than, Key (I l), Const_int r)
+        )
+      | _ -> None
+    ]}
 *)
 type 'k split_fn = (bool, 'k) t -> ((bool, 'k) t * (bool, 'k) t) option
 
 (** Encapsulates {i subsets} of theories for simple
     expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}.
     These will generally be {b convex} theories that don't result in a case split.
-    That's what {!split_fn} is for. *)
+    That's what {!split_fn} is for.
+
+    {2 A possibly (definitely) incorrect constant int equality LOGIC}
+
+    Implement the module...
+
+    {[
+    module MyLogic : LOGIC = struct
+      type atom = int * int
+
+      let rec extract (formula : (bool, 'k) Formula.t) : atom list =
+        match formula with
+        | And exprs -> exprs |> List.map ~f:extract |> List.concat
+        | Binop (Equal, Key I x, Const_int c) -> (x, c)
+        | [] -> []
+
+      let solve (atoms : atom list) : 'k Solution.t =
+        let map = Map.of_alist_exn atoms in
+        Solution.Sat (
+          Model.of_local map ~lookup:Map.find
+        )
+    end
+    ]}
+
+    Then we {!extract} and {!solve} on {!Formula.t} formulas:
+
+    {[
+    include Symbol
+
+    let my_formula = Formula.And [
+      Binop (Equal, AsciiSymbol.make_int 'a', Const_int 123456);
+      Binop (Equal, AsciiSymbol.make_int 'b', Const_int 123457)
+    ]
+
+    let atoms = MyLogic.extract my_formula
+
+    let solution = MyLogic.solve atoms
+    ]}
+*)
 module type LOGIC = sig
   (** Whatever type the logic works with. *)
   type atom
 
-  (** Transform FORMULA into a list of atoms to pass into [solve]. *)
+  (** Transform [(bool, 'k) t] FORMULA into a list of atoms to pass into [solve]. *)
   val extract : (bool, 'k) t -> atom list
 
-  (** Search for a satisfying model of ATOMS, if some exists. *)
+  (** Search for a satisfying model of ATOMS, if any exists. *)
   val solve : atom list -> 'k Solution.t
 end
 
 
 (** An adapter type for calling an SMT solver backend.
 
-    You can bind a [LOGIC] list of modules to LOGICS in order
+    You can bind a [LOGIC] list of modules to LOGICS along with 
+    branch functions ({!split_fn}) to SPLITS in order
     to preprocess (and hopefully outright solve) future
     calls to SOLVE [[ t ]].
 
-    For example, {!Overlays.Typed_z3} can be used as an argument to {!Make_solver}:
-{[
-module Backend_z3 = Formula.Make_solver(Typed_z3)
-let result = Backend_z3.solve [
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Binop (Equal, Key b, Const_int 123456);
-    Binop (Equal, Key c, Const_int 123456);
-    Binop (Equal, Key d, Const_int 123456);
-  ];
-]
-]}
+    {2 {!Overlays.Typed_z3} as an argument to {!Make_solver}}
+    {[
+    module Backend_z3 = Formula.Make_solver(Typed_z3)
+    let result = Backend_z3.solve [
+      And [
+        Binop (Equal, Key a, Const_int 123456);
+        Binop (Equal, Key b, Const_int 123456);
+        Binop (Equal, Key c, Const_int 123456);
+        Binop (Equal, Key d, Const_int 123456);
+      ];
+    ]
+    ]}
 *)
 module type SOLVABLE = sig
   include S
 
   (** List of case splitters that the solver should
-      branch exprs on when it needs to make a decision. *)
+      branch exprs on when it needs to make a decision.
+
+      {2 Including the {!Splits.lucky_guess} branch function}
+      {[
+      module MySolveable = struct
+        include Overlays.Typed_z3
+        let splits = [Splits.lucky_guess]
+      end
+      ]}
+  *)
   val splits : 'k split_fn list
 
   (** List of logics the solver should process prior to
       calling the backend solve.
 
-      For example, to preprocess with IDL reasoning using the
-      [Diff] module:
+      {2 Including the {!Diff} module}
       {[
       module MySolvable = struct
         include Overlays.Typed_z3
@@ -91,9 +152,9 @@ module type SOLVABLE = sig
   *)
   val logics : (module LOGIC) list
 
-  (** Searches for a satisfying model of the {i conjunction} of EXPRS.
+(** Searches for a satisfying model of the {i conjunction} of EXPRS.
 
-      Example:
+      {3 Example}
       {[
       let expr = And [
         Binop (Equal, Key a, Const_int 123456);
@@ -246,6 +307,7 @@ type 'k solver = (bool, 'k) t list -> 'k Solution.t
 
     For example, if [uid]s were encoded as ASCII codes for keys 'a', 'b', 'c', 'd',
     we could decode that to a [string]:
+    {3 Example}
     {[
       printf "(%d) Hybrid solve on: %s\n"
         i

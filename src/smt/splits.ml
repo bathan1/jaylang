@@ -11,7 +11,7 @@
 
     ...
 
-    Example:
+    {2 Logging the splits}
     {[
     let key uid = uid |> Char.of_int_exn |> Char.to_string
 
@@ -23,10 +23,13 @@
         printf "Left split is %s\n" (Formula.to_string left ~key);
         printf "Right split is %s\n" (Formula.to_string right ~key)
 
-        (* Prints
-           "Left split is (a < 123456)"
-           "Right split is (a > 123456)"
-        *)
+    ]}
+
+    This prints:
+
+    {[
+    "Left split is (a < 123456)"
+    "Right split is (a > 123456)"
     ]}
 
     ...
@@ -35,7 +38,7 @@
 
     ...
 
-    Is this stupid simple??
+    Or at least I hope it is...
 *)
 let lucky_guess : 'k Formula.split_fn = function
   | Not (Binop (Equal, Key I l, Const_int r))

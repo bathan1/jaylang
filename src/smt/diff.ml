@@ -35,16 +35,20 @@ type atom = {
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
 
-    {3 Example}
+    {2 Extracting 2 leqs}
+
     {[
     let () =
       Diff.extract (And [
         Binop (Less_than_eq, Key a, Key b);
         Binop (Less_than_eq, Key c, Key d);
       ])
-      |> fun ls -> printf "%d\n" (List.length ls)
-      (* Prints: 2 *)
+      |> fun ls -> printf "Atoms list has size %d\n" (List.length ls)
     ]}
+
+    This would print:
+
+    {["Atoms list has size 2"]}
 *)
 let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   formula
@@ -100,7 +104,7 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Not Binop (Less_than_eq, Key I x, Const_int c) ->
     [{ x = 0; y = x; c = -(c + 1) }]
 
-  | Formula.And exprs ->
+  | And exprs ->
     exprs
     |> List.map ~f:extract
     |> List.concat

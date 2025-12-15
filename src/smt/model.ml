@@ -44,13 +44,17 @@ let empty : 'k t = { value = (fun _ -> None) }
       let merged = Model.merge left_model right_model in
       printf "Merged models: %s\n" (pp_model merged [a; b; c;])
       (*
-        Merged models: {
-          a => -7
-          b => 3
-          c => 10
-        }
       *)
-    ;;
+    ]}
+
+    Prints:
+
+    {[
+    "Merged models: {
+      a => -7
+      b => 3
+      c => 10
+    }"
     ]}
 *)
 let merge (left : 'k t) (right : 'k t) : 'k t =
@@ -81,18 +85,20 @@ let merge (left : 'k t) (right : 'k t) : 'k t =
           | _ -> None
       )
       in
-      let str_repr = Model.to_string model [a; b;] ~pp_assignment:(
+      let str_repr = Model.to_string model [a; b;] ~sep:("; ") ~pp_assignment:(
           fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
       )
       in
       printf "Model formatted: %s\n" str_repr;
       (*
-        Model formatted: {
-          a => 7
-          b => 3
-        }
+        
       *)
     ;;
+    ]}
+
+    Prints:
+    {[
+    "Model formatted: { a => 7; b => 3 }"
     ]}
 *)
 let to_string
@@ -118,7 +124,7 @@ let to_string
 
 (** Fold KEYS over their value from MODEL by calling [F INIT var data].
 
-    {3 Example}
+    {3 Fold over a trivial static model}
     {[
     let () =
       let open Symbol in
@@ -137,9 +143,11 @@ let to_string
       |> Map.to_alist
       |> List.to_string ~f:(fun (k, v) -> sprintf "%c=%d" (Char.of_int_exn k) v)
       |> printf "Folded: %s\n";
-      (* Prints: 'Folded: (a=7 b=3)' *)
-    ;;
     ]}
+
+    Prints:
+
+    {["Folded: (a=7 b=3)"]}
 *)
 let fold
   (model : 'k t)
@@ -153,7 +161,7 @@ let fold
       | None -> acc
     )
 
-(** Cast LOCAL into type [Model.t] by wrapping [Model.value]
+(** Cast LOCAL into type {!Model.t} by wrapping [!Model.value]
     calls with the LOOKUP callback.
 
     LOOKUP is passed in arguments
@@ -164,7 +172,11 @@ let fold
     It should return an [option] of whatever value LOCAL holds for the
     given [uid].
 
-    {3 Example}
+    {2 From an {!Int.Map} local solution}
+
+    Local solutions that use some kind of a {!Map} map nicely to
+    to the 'global' {!t}:
+
     {[
     let () =
       let int_map = (
@@ -172,23 +184,19 @@ let fold
         |> Map.add_exn ~key:(Char.to_int 'a') ~data:0
         |> Map.add_exn ~key:(Char.to_int 'b') ~data:1
       ) in
-        let pp_model = Model.to_string ~pp_assignment:(
-          fun (I x) v -> sprintf "  %c => %s" (Char.of_int_exn x) (
+        let pp_model = Model.to_string ~sep:("; ") ~pp_assignment:(
+          fun (I x) v -> sprintf " %c => %s" (Char.of_int_exn x) (
             if v = 0 then "hello" else "world"
           )
         ) in
         let model = Model.of_local int_map ~lookup:Map.find in
         pp_model model [a; b;]
         |> printf "From local: %s\n";
-        (* 
-          Prints:
-          From local: {
-            a => hello
-            b => world
-          }
-        *)
-    ;;
     ]}
+
+    This prints:
+
+    {["From local: { a => hello; b => world }"]}
 *)
 let of_local (local : 'a) ~(lookup : 'a -> int -> 'b option): 'k t =
   {
