@@ -256,13 +256,13 @@ type 'k solver = (bool, 'k) t list -> 'k Solution.t
 let rec to_string : type a k. ?key:(int -> string) -> (a, k) t -> string =
   fun
     ?(key=fun uid -> (
-      sprintf "<Key#%d>" uid
-    )) formula ->
+    sprintf "<Key#%d>" uid
+  )) formula ->
   match formula with
   | Const_int i -> Int.to_string i
   | Const_bool b -> Bool.to_string b
   | Key (I uid)
-  | Key (B uid) -> key uid
+    | Key (B uid) -> key uid
   | Not e ->
     sprintf "(not %s)" (to_string e ~key)
   | And es ->
@@ -293,18 +293,18 @@ let rec evaluate : type a k. (a, k) t -> (a, k) t = function
   | Key _ as e -> e
 
   | Not e ->
-      let e' = evaluate e in
-      not_ e'
+    let e' = evaluate e in
+    not_ e'
 
   | And es ->
-      es
-      |> List.map ~f:evaluate
-      |> and_
+    es
+    |> List.map ~f:evaluate
+    |> and_
 
   | Binop (op, e1, e2) ->
-      let e1' = evaluate e1 in
-      let e2' = evaluate e2 in
-      binop op e1' e2'
+    let e1' = evaluate e1 in
+    let e2' = evaluate e2 in
+    binop op e1' e2'
 
 (** Get the uids of all the keys in FORMULA.
 
@@ -319,80 +319,80 @@ let keys (formula : (bool, 'k) t) : int list =
   let rec go :
     type a. int list -> (a, 'k) t -> int list =
     fun acc f ->
-      match f with
-      | Const_bool _ | Const_int _ -> acc
+    match f with
+    | Const_bool _ | Const_int _ -> acc
 
-      | Key (I uid)
+    | Key (I uid)
       | Key (B uid) ->
-          uid :: acc
+      uid :: acc
 
-      | Not e ->
-          go acc e
+    | Not e ->
+      go acc e
 
-      | And es ->
-          List.fold es ~init:acc ~f:(fun acc e -> go acc e)
-      | Binop (_, l, r) ->
-          let acc = go acc l in
-          go acc r
+    | And es ->
+      List.fold es ~init:acc ~f:(fun acc e -> go acc e)
+    | Binop (_, l, r) ->
+      let acc = go acc l in
+      go acc r
   in
   go [] formula
 
 open Utils
 let partition (and_expr : (bool, 'k) t) : (bool, 'k) t =
   let exprs = (match and_expr with
-  | And ls -> ls
-  | _ -> []) in
+    | And ls -> ls
+    | _ -> []) in
   if List.is_empty exprs then
     and_expr
   else
-  let symbols = keys and_expr in
-  let sorted = Stdlib.List.sort_uniq Int.compare symbols in
-  let index_to_symbol = Array.of_list sorted in
-  let n = Array.length index_to_symbol in
-  let symbol_to_index = Hashtbl.of_alist_exn (module Int) (
-    List.of_array (
-      Array.mapi index_to_symbol ~f:(fun i uid -> uid, i)
-    )
-  ) in
-  let union_in_atom uf atom =
-    match atom with
-    | Binop (_, Key (I x), Key (I y)) ->
+    let symbols = keys and_expr in
+    let sorted = Stdlib.List.sort_uniq Int.compare symbols in
+    let index_to_symbol = Array.of_list sorted in
+    let n = Array.length index_to_symbol in
+    let symbol_to_index = Hashtbl.of_alist_exn (module Int) (
+      List.of_array (
+        Array.mapi index_to_symbol ~f:(fun i uid -> uid, i)
+      )
+    ) in
+    let union_in_atom uf atom =
+      match atom with
+      | Binop (_, Key (I x), Key (I y)) ->
         let ix = Hashtbl.find_exn symbol_to_index x in
         let iy = Hashtbl.find_exn symbol_to_index y in
         ignore (Uf.union uf ix iy)
-    | _ -> ()
-  in
-  let uf = Uf.make n in
-  List.iter exprs ~f:(fun f -> union_in_atom uf f);
-  let buckets = Array.init n ~f:(fun _ -> ref []) in
+      | _ -> ()
+    in
+    let uf = Uf.make n in
+    List.iter exprs ~f:(fun f -> union_in_atom uf f);
+    let buckets = Array.init n ~f:(fun _ -> ref []) in
 
-  let rec keys_of_atom acc = function
-    | Binop (_, Key (I x), Key (I y)) -> x :: y :: acc
-    | Binop (_, Key (I x), _) -> x :: acc
-    | Binop (_, _, Key (I y)) -> y :: acc
-    | Not e -> keys_of_atom acc e
-    | And es -> List.fold es ~init:acc ~f:keys_of_atom
-    | _ -> acc
-  in
+    let rec keys_of_atom acc = function
+      | Binop (_, Key (I x), Key (I y)) -> x :: y :: acc
+      | Binop (_, Key (I x), _) -> x :: acc
+      | Binop (_, _, Key (I y)) -> y :: acc
+      | Not e -> keys_of_atom acc e
+      | And es -> List.fold es ~init:acc ~f:keys_of_atom
+      | _ -> acc
+    in
 
-  List.iter exprs ~f:(fun atom ->
-    match keys_of_atom [] atom with
-    | [] -> ()
-    | uid :: _ ->
+    List.iter exprs ~f:(fun atom ->
+      match keys_of_atom [] atom with
+      | [] -> ()
+      | uid :: _ ->
         let idx = Hashtbl.find_exn symbol_to_index uid in
         let root = Uf.find uf idx in
         buckets.(root) := atom :: !(buckets.(root))
-  );
+    );
 
-  let components = Array.fold buckets ~init:[] ~f:(fun acc atoms_ref ->
-    match !(atoms_ref) with
-    | [] -> acc
-    | atoms ->
-      (* Reverse to retain left-to-right ordering in EXPR *)
-      (And (List.rev atoms)) :: acc
-  ) in
+    let components = Array.fold buckets ~init:[] ~f:(fun acc atoms_ref ->
+      match !(atoms_ref) with
+      | [] -> acc
+      | atoms ->
+        (* Reverse to retain left-to-right ordering in EXPR *)
+        (And (List.rev atoms)) :: acc
+    ) in
 
-  And (List.rev components)
+    And (List.rev components)
 ;;
 
 let bools (formula : (bool, 'k) t) : Int.Set.t Int.Map.t =
@@ -403,71 +403,132 @@ let bools (formula : (bool, 'k) t) : Int.Set.t Int.Map.t =
   in
   formula
   |> function
-    | And ls -> (
-        List.fold ls ~init:(Int.Map.empty : Int.Set.t Int.Map.t) ~f:(fun acc f -> (
-          match f with
-          | Binop (Not_equal, Key I x, Const_int c)
-          | Binop (Not_equal, Const_int c, Key I x)
-          | Not (Binop (Equal, Key I x, Const_int c))
-          | Not (Binop (Equal, Const_int c, Key I x)) ->
-            let set = get_set acc x in
-            let next = Set.add set c in
-            Map.set acc ~key:x ~data:next
-          | _ -> acc
-        ))
-      )
-    | _ -> Int.Map.empty
+  | And ls -> (
+    List.fold ls ~init:(Int.Map.empty : Int.Set.t Int.Map.t) ~f:(fun acc f -> (
+      match f with
+      | Binop (Not_equal, Key I x, Const_int c)
+        | Binop (Not_equal, Const_int c, Key I x)
+        | Not (Binop (Equal, Key I x, Const_int c))
+        | Not (Binop (Equal, Const_int c, Key I x)) ->
+        let set = get_set acc x in
+        let next = Set.add set c in
+        Map.set acc ~key:x ~data:next
+      | _ -> acc
+    ))
+  )
+  | _ -> Int.Map.empty
 ;;
+
+(** Maybe branch on an unresolved literal in [(bool, 'k) t] of CONJUNCTIONS ({!And}),
+    if such a branch exists. If it does exist, then this returns a two tuple
+    RESULT where [RESULT[0] = branching literal] and [RESULT[1] = list with that literal removed].
+*)
+let pick
+  (conjunction : (bool, 'k) t)
+  : ((bool, 'k) t * (bool, 'k) t) option =
+  match conjunction with
+  | And exprs ->
+    let rec aux acc = function
+      | [] -> None
+      | x :: xs ->
+        match x with
+        | Not (Binop (Equal, Key I _, Const_int _))
+          | Not (Binop (Equal, Const_int _, Key I _))
+          | Binop (Not_equal, Key I _, Const_int _)
+          | Binop (Not_equal, Const_int _, Key I _) ->
+          let rest = List.rev_append acc xs in
+          Some (x, And rest)
+        | _ ->
+          aux (x :: acc) xs
+    in
+    aux [] exprs
+
+  | _ ->
+    None
+
+let split_neq = function
+  | Not (Binop (Equal, Key I l, Const_int r))
+    | Not (Binop (Equal, Const_int r, Key I l))
+    | Binop (Not_equal, Key I l, Const_int r)
+    | Binop (Not_equal, Const_int r, Key I l) ->
+    (
+      Binop (Less_than, Key (I l), Const_int r),
+      Binop (Greater_than, Key (I l), Const_int r)
+    )
+  | _ ->
+    failwith "pick returned non-neq literal lol"
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
-  (** Search for a [Smt.Solution solution] that satisfies the {i conjunction} of EXPRS.
+  (** Search for a [Smt.Solution solution] that satisfies the {i conjunction} of ([bool, 'k) t list EXPRS])
+      for [int TRIES_LEFT] more recursive calls at most, which by default is set to 100 arbitrarily.
 
-      We assume calling [X.solve] is expensive, so this attempts to reduce EXPRS to a [Const_bool].
+      We assume calling [X.solve] is expensive because it's external, so this attempts to 
+      reduce EXPRS to a [Const_bool] using user-defined OCaml modules at first. So we take that
+      tradeoff of extra computation overhead with the hopes of {i hitting} a solution more often than
+      {i missing} one.
 
-      If it can't reduce into a [Const_bool], then it calls [X.solve] on the {i reduced conjunction}.
+      If it can't reduce into a [Const_bool], then it calls [X.solve] on [EXPRS].
   *)
-  let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
-    exprs
-    |> and_
-    |> function
-    | Const_bool true -> Solution.Sat Model.empty
-    | Const_bool false -> Solution.Unsat
-    | e ->
-      let (partial_model, simplified) =
-        List.fold X.logics
-          ~init:(Model.empty, e)
-          ~f:(fun (acc_model, acc_formula) (module L) ->
-            let atoms = L.extract acc_formula in
-            match L.solve atoms with
-            | Unsat ->
-              (acc_model, Const_bool false)
-            | Unknown ->
-              (acc_model, acc_formula)
-            | Sat model ->
-              let acc_model' = Model.merge acc_model model in
-              let residual = L.propagate model acc_formula in
-              (acc_model', residual)
-          )
-      in
-
-      printf "Simplified: %s\n" (to_string simplified ~key:(fun uid -> (
-        Char.of_int_exn uid |> Char.to_string)
-      ));
-
-      match evaluate simplified with
+  let rec solve ?(tries_left = 100) (exprs : (bool, 'k) t list) : 'k Solution.t =
+    if tries_left <= 0 then
+      Solution.Unknown
+    else
+      exprs
+      |> and_
+      |> function
+      | Const_bool true -> Solution.Sat Model.empty
       | Const_bool false -> Solution.Unsat
-      | Const_bool true  ->
-        printf "HIT early-solve\n";
-        Solution.Sat partial_model
-      | e'' ->
-        printf "MISS early-solve, deferring to backend: %s\n" (to_string simplified ~key:(fun uid -> Char.of_int_exn uid |> Char.to_string));
-        (* backend solver *)
-        let backend_solution = X.solve [ M.transform e'' ] in
-        match backend_solution with
-        | Solution.Sat backend_model ->
-          Solution.Sat (Model.merge partial_model backend_model)
-        | other -> other
+      | e ->
+        if List.is_empty X.logics then
+          X.solve [M.transform e]
+        else
+          let theory_unsat =
+            List.exists X.logics ~f:(fun (module L) ->
+              match L.solve (L.extract e) with
+              | Unsat -> true
+              | _ -> false
+            )
+          in
+          if theory_unsat then
+            Solution.Unsat
+          else
+            match pick e with
+            | None ->
+              let model =
+                List.fold X.logics
+                  ~init:Model.empty
+                  ~f:(fun acc_model (module L) ->
+                    match L.solve (L.extract e) with
+                    | Sat m -> Model.merge acc_model m
+                    | _ -> acc_model
+                  )
+              in
+              Solution.Sat model
+            | Some (lit, rest) ->
+              let left, right = split_neq lit in
+
+              let left_branch  =
+                match rest with
+                | And xs -> And (left :: xs)
+                | _ -> And [left; rest]
+              in
+
+              let right_branch =
+                match rest with
+                | And xs -> And (right :: xs)
+                | _ -> And [right; rest]
+              in
+
+              begin
+                match solve [left_branch] with
+                | Solution.Sat m -> Solution.Sat m
+                | Solution.Unsat ->
+                  solve [right_branch]
+                | Solution.Unknown ->
+                  X.solve [ M.transform e ]
+                end
+
 end
 

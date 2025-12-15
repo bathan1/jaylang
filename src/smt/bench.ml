@@ -156,13 +156,6 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
     Binop (Less_than_eq, Key b, Const_int 123456);
   ];
 ]
-let () =
-  Diff.extract (And [
-    Binop (Less_than_eq, Key a, Key b);
-    Binop (Less_than_eq, Key c, Key d);
-  ])
-  |> fun ls -> printf "%d\n" (List.length ls)
-  (* Prints: 2 *)
 
 let () =
   exprs
