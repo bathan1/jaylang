@@ -15,6 +15,7 @@ module Hybrid_z3 = Formula.Make_solver (struct
   let logics : (module Formula.LOGIC) list = [
     (module Diff)
   ]
+  let splits = [Splits.lucky_guess]
 end)
 
 let run_hybrid expr (vars : _ AsciiSymbol.t list) ~i =

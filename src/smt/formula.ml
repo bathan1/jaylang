@@ -27,8 +27,16 @@ type (_, 'k) t =
   | And : (bool, 'k) t list -> (bool, 'k) t
   | Binop : ('a * 'a * 'b) Binop.t * ('a, 'k) t * ('a, 'k) t -> ('b, 'k) t
 
+(** Splits [(bool, 'k) t] FORMULA into 2 cases that are each
+    {i potentially} satisfiable. Split functions are what make
+    {b non-convex} theories usable by the solver.
+*)
+type 'k split_fn = (bool, 'k) t -> ((bool, 'k) t * (bool, 'k) t) option
+
 (** Encapsulates {i subsets} of theories for simple
-    expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}. *)
+    expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}.
+    These will generally be {b convex} theories that don't result in a case split.
+    That's what {!SPLIT} is for. *)
 module type LOGIC = sig
   (** Whatever type the logic works with. *)
   type atom
@@ -38,10 +46,8 @@ module type LOGIC = sig
 
   (** Search for a satisfying model of ATOMS, if some exists. *)
   val solve : atom list -> 'k Solution.t
-
-  (** Rewrite FORMULA given MODEL. *)
-  val propagate : 'k Model.t -> (bool, 'k) t -> (bool, 'k) t
 end
+
 
 (** An adapter type for calling an SMT solver backend.
 
@@ -65,34 +71,38 @@ let result = Backend_z3.solve [
 module type SOLVABLE = sig
   include S
 
+  (** List of case splitters that the solver should
+      branch exprs on when it needs to make a decision. *)
+  val splits : 'k split_fn list
+
   (** List of logics the solver should process prior to
       calling the backend solve.
 
       For example, to preprocess with IDL reasoning using the
       [Diff] module:
-{[
-module MySolvable = struct
-  include Overlays.Typed_z3
-  let logics : (module Formula.LOGIC) list = [
-    (module Diff)
-  ]
-end
-]}
+      {[
+      module MySolvable = struct
+        include Overlays.Typed_z3
+        let logics : (module Formula.LOGIC) list = [
+          (module Diff)
+        ]
+      end
+      ]}
   *)
   val logics : (module LOGIC) list
 
   (** Searches for a satisfying model of the {i conjunction} of EXPRS.
 
       Example:
-{[
-let expr = And [
-  Binop (Equal, Key a, Const_int 123456);
-  Not (Binop (Equal, Key b, Const_int 123456));
-  Binop (Equal, Key c, Const_int 123456);
-  Binop (Equal, Key d, Const_int 123456);
-]
-let result = MySolvable.solve [expr]
-]}
+      {[
+      let expr = And [
+        Binop (Equal, Key a, Const_int 123456);
+        Not (Binop (Equal, Key b, Const_int 123456));
+        Binop (Equal, Key c, Const_int 123456);
+        Binop (Equal, Key d, Const_int 123456);
+      ]
+      let result = MySolvable.solve [expr]
+      ]}
   *)
   val solve : (bool, 'k) t list -> 'k Solution.t
 end
@@ -419,57 +429,62 @@ let bools (formula : (bool, 'k) t) : Int.Set.t Int.Map.t =
   | _ -> Int.Map.empty
 ;;
 
-(** Maybe branch on an unresolved literal in [(bool, 'k) t] of CONJUNCTIONS ({!And}),
-    if such a branch exists. If it does exist, then this returns a two tuple
-    RESULT where [RESULT[0] = branching literal] and [RESULT[1] = list with that literal removed].
+(** Maybe branch on an unresolved literal in [(bool, 'k) t] of CONJUNCTIONS 
+    ({!And}) based on the rules encoded in the [(module SPLIT) list] SPLITS, 
+    if such a branch exists.
+
+    If it does exist, then this returns a 3 tuple
+    RESULT where:
+      - [RESULT[0] = left split]
+      - [RESULT[1] = right split]
+      - [RESULT[2] = expression with the literal removed.]
+    And RESULT is just the very {b first} split function that returns [Some] result.
 *)
-let pick
+let branch
+  (splits : 'k split_fn list)
   (conjunction : (bool, 'k) t)
-  : ((bool, 'k) t * (bool, 'k) t) option =
+  : ((bool, 'k) t * (bool, 'k) t * (bool, 'k) t) option =
   match conjunction with
   | And exprs ->
     let rec aux acc = function
       | [] -> None
       | x :: xs ->
-        match x with
-        | Not (Binop (Equal, Key I _, Const_int _))
-          | Not (Binop (Equal, Const_int _, Key I _))
-          | Binop (Not_equal, Key I _, Const_int _)
-          | Binop (Not_equal, Const_int _, Key I _) ->
-          let rest = List.rev_append acc xs in
-          Some (x, And rest)
-        | _ ->
-          aux (x :: acc) xs
+        let rest = And (List.rev_append acc xs) in
+        let rec try_splitters = function
+          | [] ->
+            aux (x :: acc) xs
+          | split :: ss ->
+            match split x with
+            | Some (left, right) ->
+              Some (left, right, rest)
+            | None ->
+              try_splitters ss
+        in
+        try_splitters splits
     in
     aux [] exprs
-
-  | _ ->
-    None
-
-let split_neq = function
-  | Not (Binop (Equal, Key I l, Const_int r))
-    | Not (Binop (Equal, Const_int r, Key I l))
-    | Binop (Not_equal, Key I l, Const_int r)
-    | Binop (Not_equal, Const_int r, Key I l) ->
-    (
-      Binop (Less_than, Key (I l), Const_int r),
-      Binop (Greater_than, Key (I l), Const_int r)
-    )
-  | _ ->
-    failwith "pick returned non-neq literal lol"
+  | _ -> None
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
-  (** Search for a [Smt.Solution solution] that satisfies the {i conjunction} of ([bool, 'k) t list EXPRS])
-      for [int TRIES_LEFT] more recursive calls at most, which by default is set to 100 arbitrarily.
+  (** Search for a [Smt.Solution solution] that satisfies the 
+      {i conjunction} of [bool, 'k) t list] EXPRS for [int]
+      TRIES_LEFT more recursive calls at most, which by 
+      default is set to 100 arbitrarily.
 
-      We assume calling [X.solve] is expensive because it's external, so this attempts to 
-      reduce EXPRS to a [Const_bool] using user-defined OCaml modules at first. So we take that
-      tradeoff of extra computation overhead with the hopes of {i hitting} a solution more often than
-      {i missing} one.
+      We assume calling [X.solve] is expensive because it's 
+      external, so this attempts to reduce EXPRS to a [Const_bool] 
+      using user-defined OCaml modules at first.
+
+      So we take that tradeoff of extra computation overhead with 
+      the hopes of {i hitting} a solution more often than {i missing} one.
 
       If it can't reduce into a [Const_bool], then it calls [X.solve] on [EXPRS].
+
+      ...
+
+      This is essentially a dumbed down version of the DPLL(T) algorithm.
   *)
   let rec solve ?(tries_left = 100) (exprs : (bool, 'k) t list) : 'k Solution.t =
     if tries_left <= 0 then
@@ -494,7 +509,7 @@ module Make_solver (X : SOLVABLE) = struct
           if theory_unsat then
             Solution.Unsat
           else
-            match pick e with
+            match branch X.splits e with
             | None ->
               let model =
                 List.fold X.logics
@@ -506,10 +521,9 @@ module Make_solver (X : SOLVABLE) = struct
                   )
               in
               Solution.Sat model
-            | Some (lit, rest) ->
-              let left, right = split_neq lit in
 
-              let left_branch  =
+            | Some (left, right, rest) ->
+              let left_branch =
                 match rest with
                 | And xs -> And (left :: xs)
                 | _ -> And [left; rest]
@@ -523,12 +537,14 @@ module Make_solver (X : SOLVABLE) = struct
 
               begin
                 match solve [left_branch] with
-                | Solution.Sat m -> Solution.Sat m
+                | Solution.Sat m ->
+                  Solution.Sat m
+
                 | Solution.Unsat ->
                   solve [right_branch]
-                | Solution.Unknown ->
-                  X.solve [ M.transform e ]
-                end
 
+                | Solution.Unknown ->
+                  X.solve [M.transform e]
+                end
 end
 

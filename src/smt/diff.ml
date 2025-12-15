@@ -1,5 +1,5 @@
-(* We include this specific implementation of [Formula.LOGIC] since
-   a large number of expressions the cevaluator generates
+(* We include this specific implementation of [Formula.LOGIC] 
+   since a large number of expressions ceval generates
    can be simplified / solved using Integer Difference Logic. *)
 open Core
 
@@ -12,7 +12,15 @@ open Core
       {-[<=]}
       {-[>=]}
       {-[>]} }
-    This module normalizes all inputs into [<=] relations. *)
+
+    ...
+
+    This module normalizes all inputs into [<=] relations
+    and {b ignores} [<>] relations. So rather than handle
+    [<>], [Diff] expects the top-level {!Formula.solver} 
+    solver to rewrite inequalities into equivalent 
+    disjunctions and call this module on the {i split} cases.
+*)
 type atom = {
   (** Variable (id) to subtract. *)
   x : int;
@@ -191,74 +199,4 @@ let solve (atoms : atom list) : 'k Solution.t =
 
   loop dist
 ;;
-
-(** Propagate MODEL into FORMULA to spit out a new residual [Formula].
-
-    {3 Example}
-    {[
-    open Smt
-    open Smt.Symbol
-
-    let symbol = AsciiSymbol.make_int
-    let a = symbol 'a' and b = symbol 'b'
-    let () =
-      (* (a >= 5) AND (b < a) *)
-      let formula =
-          Formula.And
-          [
-            Binop (Greater_than_eq, Key a, Const_int 5);
-            Binop (Less_than, Key b, Key a);
-          ]
-      in
-      let model = Model.of_local 0 ~lookup:(fun _ uid ->
-        uid
-        |> function
-          | key when Char.to_int 'a' = key -> Some 7
-          | key when Char.to_int 'b' = key -> Some 3
-          | _ -> None
-      )
-      in
-
-      let residual = Diff.propagate model formula in
-
-      (* Prints: "Residual formula: ((7 >= 5) ^ (3 < 7))" *)
-      printf "Residual formula: %s\n"
-        (Formula.to_string residual
-          ~key:(fun uid -> Char.to_string (Char.of_int_exn uid)))
-    ]}
-*)
-let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
-  : (bool, 'k) Formula.t =
-  let vars = Formula.keys formula in
-  let model_unboxed = Model.fold model vars ~init:Int.Map.empty ~f:Map.set
-  in
-  let rec aux : type a. (a,'k) Formula.t -> (a,'k) Formula.t = fun f ->
-    match f with
-    | Const_bool _ -> f
-    | Const_int _ -> f
-
-    | Not (Binop (Equal, _, _)) -> f
-    | Not e ->
-      let e' = aux e in
-      Not e'
-
-    | And es ->
-      let es' = List.map es ~f:aux in
-      And es'
-
-    | Binop (Not_equal, _, _) -> f
-    | Binop (op, l, r) ->
-      let l' = aux l in
-      let r' = aux r in
-      Binop (op, l', r')
-
-    | Key (I x) ->
-      begin match Map.find model_unboxed x with
-        | Some v -> Const_int v
-        | None -> f
-        end
-    | _ -> f
-  in
-
-  aux formula
 
