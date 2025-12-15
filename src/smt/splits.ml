@@ -11,10 +11,6 @@
 
     ...
 
-    Keeping it stupid simple since '25
-
-    ...
-
     Example:
     {[
     let key uid = uid |> Char.of_int_exn |> Char.to_string
@@ -26,7 +22,20 @@
       |> fun (left, right) ->
         printf "Left split is %s\n" (Formula.to_string left ~key);
         printf "Right split is %s\n" (Formula.to_string right ~key)
+
+        (* Prints
+           "Left split is (a < 123456)"
+           "Right split is (a > 123456)"
+        *)
     ]}
+
+    ...
+
+    Keeping it stupid simple since '25
+
+    ...
+
+    Is this stupid simple??
 *)
 let lucky_guess : 'k Formula.split_fn = function
   | Not (Binop (Equal, Key I l, Const_int r))

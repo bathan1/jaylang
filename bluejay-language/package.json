@@ -44,6 +44,6 @@
     "docs:dev": "vitepress dev",
     "docs:build": "vitepress build",
     "docs:preview": "vitepress preview",
-    "docs:odoc": "cd .. && rm -rf docs/public/_html && dune build @doc && cp -r _build/default/_doc/_html docs/public && cd bluejay-language"
+    "docs:odoc": "cd .. && rm -rf bluejay-language/docs/public/_html && dune build @doc && cp -r _build/default/_doc/_html bluejay-language/docs/public && cd bluejay-language"
   }
 }

@@ -36,7 +36,7 @@ type 'k split_fn = (bool, 'k) t -> ((bool, 'k) t * (bool, 'k) t) option
 (** Encapsulates {i subsets} of theories for simple
     expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}.
     These will generally be {b convex} theories that don't result in a case split.
-    That's what {!SPLIT} is for. *)
+    That's what {!split_fn} is for. *)
 module type LOGIC = sig
   (** Whatever type the logic works with. *)
   type atom
@@ -295,139 +295,6 @@ let rec to_string : type a k. ?key:(int -> string) -> (a, k) t -> string =
       | Or -> "or"
     in
     sprintf "(%s %s %s)" (to_string e1 ~key) op_str (to_string e2 ~key)
-
-(** Evaluate constant literals from FORMULA. *)
-let rec evaluate : type a k. (a, k) t -> (a, k) t = function
-  | Const_int _ as e -> e
-  | Const_bool _ as e -> e
-  | Key _ as e -> e
-
-  | Not e ->
-    let e' = evaluate e in
-    not_ e'
-
-  | And es ->
-    es
-    |> List.map ~f:evaluate
-    |> and_
-
-  | Binop (op, e1, e2) ->
-    let e1' = evaluate e1 in
-    let e2' = evaluate e2 in
-    binop op e1' e2'
-
-(** Get the uids of all the keys in FORMULA.
-
-    For example:
-    {[
-      let propagate (model : 'k Model.t) (formula : (bool, 'k) Formula.t)
-        : (bool, 'k) Formula.t =
-        let vars = Formula.keys formula in
-    ]}
-*)
-let keys (formula : (bool, 'k) t) : int list =
-  let rec go :
-    type a. int list -> (a, 'k) t -> int list =
-    fun acc f ->
-    match f with
-    | Const_bool _ | Const_int _ -> acc
-
-    | Key (I uid)
-      | Key (B uid) ->
-      uid :: acc
-
-    | Not e ->
-      go acc e
-
-    | And es ->
-      List.fold es ~init:acc ~f:(fun acc e -> go acc e)
-    | Binop (_, l, r) ->
-      let acc = go acc l in
-      go acc r
-  in
-  go [] formula
-
-open Utils
-let partition (and_expr : (bool, 'k) t) : (bool, 'k) t =
-  let exprs = (match and_expr with
-    | And ls -> ls
-    | _ -> []) in
-  if List.is_empty exprs then
-    and_expr
-  else
-    let symbols = keys and_expr in
-    let sorted = Stdlib.List.sort_uniq Int.compare symbols in
-    let index_to_symbol = Array.of_list sorted in
-    let n = Array.length index_to_symbol in
-    let symbol_to_index = Hashtbl.of_alist_exn (module Int) (
-      List.of_array (
-        Array.mapi index_to_symbol ~f:(fun i uid -> uid, i)
-      )
-    ) in
-    let union_in_atom uf atom =
-      match atom with
-      | Binop (_, Key (I x), Key (I y)) ->
-        let ix = Hashtbl.find_exn symbol_to_index x in
-        let iy = Hashtbl.find_exn symbol_to_index y in
-        ignore (Uf.union uf ix iy)
-      | _ -> ()
-    in
-    let uf = Uf.make n in
-    List.iter exprs ~f:(fun f -> union_in_atom uf f);
-    let buckets = Array.init n ~f:(fun _ -> ref []) in
-
-    let rec keys_of_atom acc = function
-      | Binop (_, Key (I x), Key (I y)) -> x :: y :: acc
-      | Binop (_, Key (I x), _) -> x :: acc
-      | Binop (_, _, Key (I y)) -> y :: acc
-      | Not e -> keys_of_atom acc e
-      | And es -> List.fold es ~init:acc ~f:keys_of_atom
-      | _ -> acc
-    in
-
-    List.iter exprs ~f:(fun atom ->
-      match keys_of_atom [] atom with
-      | [] -> ()
-      | uid :: _ ->
-        let idx = Hashtbl.find_exn symbol_to_index uid in
-        let root = Uf.find uf idx in
-        buckets.(root) := atom :: !(buckets.(root))
-    );
-
-    let components = Array.fold buckets ~init:[] ~f:(fun acc atoms_ref ->
-      match !(atoms_ref) with
-      | [] -> acc
-      | atoms ->
-        (* Reverse to retain left-to-right ordering in EXPR *)
-        (And (List.rev atoms)) :: acc
-    ) in
-
-    And (List.rev components)
-;;
-
-let bools (formula : (bool, 'k) t) : Int.Set.t Int.Map.t =
-  let get_set map key =
-    match Map.find map key with
-    | Some ls -> ls
-    | _ -> Int.Set.empty
-  in
-  formula
-  |> function
-  | And ls -> (
-    List.fold ls ~init:(Int.Map.empty : Int.Set.t Int.Map.t) ~f:(fun acc f -> (
-      match f with
-      | Binop (Not_equal, Key I x, Const_int c)
-        | Binop (Not_equal, Const_int c, Key I x)
-        | Not (Binop (Equal, Key I x, Const_int c))
-        | Not (Binop (Equal, Const_int c, Key I x)) ->
-        let set = get_set acc x in
-        let next = Set.add set c in
-        Map.set acc ~key:x ~data:next
-      | _ -> acc
-    ))
-  )
-  | _ -> Int.Map.empty
-;;
 
 (** Maybe branch on an unresolved literal in [(bool, 'k) t] of CONJUNCTIONS 
     ({!And}) based on the rules encoded in the [(module SPLIT) list] SPLITS, 
