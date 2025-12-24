@@ -96,8 +96,14 @@ module type LOGIC = sig
   (** Transform [(bool, 'k) t] FORMULA into a list of atoms to pass into [solve]. *)
   val extract : (bool, 'k) t -> atom list
 
-  (** Search for a satisfying model of ATOMS, if any exists. *)
-  val solve : atom list -> 'k Solution.t
+  (** Returns a LOCAL solution. Used in the {!solve} loop to recursively check
+      if the current Solution state is OK or not; it's NOT used to assign values.
+      That's what {!extend} is for. *)
+  val check : atom list -> 'k Solution.t
+
+  (** Extend the solution to [(bool, 'k) t] FORMULA with its current solution state
+      'k Model.t MODEL to spit out a new MODEL. *)
+  val extend : (bool, 'k) t -> 'k Model.t -> 'k Model.t
 end
 
 
@@ -152,7 +158,7 @@ module type SOLVABLE = sig
   *)
   val logics : (module LOGIC) list
 
-(** Searches for a satisfying model of the {i conjunction} of EXPRS.
+  (** Searches for a satisfying model of the {i conjunction} of EXPRS.
 
       {3 Example}
       {[
@@ -430,7 +436,7 @@ module Make_solver (X : SOLVABLE) = struct
         else
           let theory_unsat =
             List.exists X.logics ~f:(fun (module L) ->
-              match L.solve (L.extract e) with
+              match L.check (L.extract e) with
               | Unsat -> true
               | _ -> false
             )
@@ -443,14 +449,11 @@ module Make_solver (X : SOLVABLE) = struct
               let model =
                 List.fold X.logics
                   ~init:Model.empty
-                  ~f:(fun acc_model (module L) ->
-                    match L.solve (L.extract e) with
-                    | Sat m -> Model.merge acc_model m
-                    | _ -> acc_model
+                  ~f:(fun acc (module L) ->
+                    L.extend e acc
                   )
               in
               Solution.Sat model
-
             | Some (left, right, rest) ->
               let left_branch =
                 match rest with

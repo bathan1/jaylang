@@ -1,14 +1,20 @@
 open Core
 
+
 (** Generic map-like type of symbols FROM namespace ['k] TO assignments
     of type ['a]. *)
 type 'k t = {
   (** Lookup the value of SYMBOL, if Some exists. *)
   value : 'a. ('a, 'k) Symbol.t -> 'a option;
+
+  keys : int list;
 }
 
 (** Lookup calls will just return [None]. *)
-let empty : 'k t = { value = (fun _ -> None) }
+let empty : 'k t = { 
+  value = (fun _ -> None);
+  keys = [];
+}
 
 (** Combine partial models LEFT and RIGHT using the "most recent model"
     strategy (RIGHT is most recent).
@@ -59,12 +65,16 @@ let empty : 'k t = { value = (fun _ -> None) }
 *)
 let merge (left : 'k t) (right : 'k t) : 'k t =
   {
-    value = fun (type a) (symbol : (a, 'k) Symbol.t) -> (
-      match right.value symbol with
-      | Some v -> Some v
-      | None -> left.value symbol
-    )
+    keys =
+      List.concat [left.keys; right.keys]
+      |> List.dedup_and_sort ~compare:Int.compare;
+    value =
+      fun (type a) (symbol : (a, 'k) Symbol.t) ->
+        match right.value symbol with
+        | Some v -> Some v
+        | None -> left.value symbol
   }
+
 
 (** Pretty-print SYMBOLS in MODEL. It formats each [symbol] [value] pair using the
     string returned by PP_ASSIGNMENT, separated by SEP (["\n"] by default).
@@ -132,14 +142,14 @@ let to_string
       and b = AsciiSymbol.make_int 'b'
       in
       let get_uid = Utils.Separate.extract in
-      let model = Model.of_local 0 ~lookup:(fun _ uid ->
+      let model = Model.of_local ~keys:[a; b;] 0 ~lookup:(fun _ uid ->
         uid
         |> function
           | key when Char.to_int 'a' = key -> Some 7
           | key when Char.to_int 'b' = key -> Some 3
           | _ -> None
       ) in
-      Model.fold model ([a; b;] |> List.map ~f:get_uid) ~init:Int.Map.empty ~f:Map.set
+      Model.fold model ~init:Int.Map.empty ~f:Map.set
       |> Map.to_alist
       |> List.to_string ~f:(fun (k, v) -> sprintf "%c=%d" (Char.of_int_exn k) v)
       |> printf "Folded: %s\n";
@@ -151,11 +161,11 @@ let to_string
 *)
 let fold
   (model : 'k t)
-  (keys : int list)
-  ~(init: 'a)
-  ~(f : 'a -> key : int -> data : int -> 'a) =
-    keys
-    |> List.fold ~init ~f:(fun acc x ->
+  ~(init : 'a)
+  ~(f : 'a -> key:int -> data:int -> 'a)
+=
+  model.keys
+  |> List.fold ~init ~f:(fun acc x ->
       match model.value (I x) with
       | Some v -> f acc ~key:x ~data:v
       | None -> acc
@@ -198,7 +208,7 @@ let fold
 
     {["From local: { a => hello; b => world }"]}
 *)
-let of_local (local : 'a) ~(lookup : 'a -> int -> 'b option): 'k t =
+let of_local (local : 'a) ~(keys : int list) ~(lookup : 'a -> int -> 'b option): 'k t =
   {
     value =
       (fun (type a) (sym : (a,'k) Symbol.t) ->
@@ -211,5 +221,7 @@ let of_local (local : 'a) ~(lookup : 'a -> int -> 'b option): 'k t =
           Option.map (lookup local x) ~f:(fun v ->
             (Obj.magic v : a)
           )
-      )
+      );
+    keys
   }
+

@@ -104,7 +104,7 @@ module Make_of_context (C : CONTEXT) : Formula.SOLVABLE = struct
           | I _ -> a_of_expr model (symbol s) unbox_int_expr
           | B _ -> a_of_expr model (symbol s) unbox_bool_expr
         in
-        Sat { value }
+        Sat { value; keys = []; }
       | UNKNOWN -> Unknown
       | UNSATISFIABLE -> Unsat
 end

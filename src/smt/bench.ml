@@ -39,6 +39,7 @@ let run_hybrid expr (vars : _ AsciiSymbol.t list) ~i =
   (* print the result *)
   (match result with
    | Solution.Sat model ->
+      printf "Have %d keys\n" (List.length model.keys);
       Model.to_string model vars ~pp_assignment:(
         fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
       )
@@ -48,7 +49,7 @@ let run_hybrid expr (vars : _ AsciiSymbol.t list) ~i =
 
   printf "⏱  Solve time: %s\n\n" duration_str
 
-let run_backend expr (vars : int AsciiSymbol.t list) ~i =
+let _run_backend expr (vars : int AsciiSymbol.t list) ~i =
   let start_time = Time_ns.now () in
 
   printf "(%d) Backend solve on: %s\n"
@@ -163,5 +164,5 @@ let () =
   |> List.iteri ~f:(
     fun i expr ->
       run_hybrid ~i:(i + 1) expr [a; b; c; d; e];
-      run_backend ~i:(i + 1) expr [a; b; c; d; e;]
+      (* run_backend ~i:(i + 1) expr [a; b; c; d; e;] *)
   )

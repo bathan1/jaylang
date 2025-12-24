@@ -49,4 +49,9 @@ let lucky_guess : 'k Formula.split_fn = function
       Binop (Less_than, Key (I l), Const_int r),
       Binop (Greater_than, Key (I l), Const_int r)
     )
+  | Not Binop (Equal, Key I x, Key I y)
+  | Binop (Not_equal, Key I x, Key I y) -> Some (
+      Binop (Less_than, Key (I x), Key (I y)),
+      Binop (Greater_than, Key (I x), Key (I y))
+    )
   | _ -> None

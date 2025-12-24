@@ -104,6 +104,13 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Not Binop (Less_than_eq, Key I x, Const_int c) ->
     [{ x = 0; y = x; c = -(c + 1) }]
 
+  (* x > y -> (y - x) <= -1 (difference is at least 1) *)
+  | Binop (Greater_than, Key I x, Key I y)
+  | Binop (Less_than,    Key I y, Key I x)
+  | Not Binop (Greater_than_eq, Key I x, Key I y)
+  | Not Binop (Less_than_eq,    Key I y, Key I x) ->
+      [{ x = y; y = x; c = -1 }]
+
   | And exprs ->
     exprs
     |> List.map ~f:extract
@@ -131,7 +138,7 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
           printf "UNSAT\n"
     ]}
 *)
-let solve (atoms : atom list) : 'k Solution.t =
+let check (atoms : atom list) : 'k Solution.t =
   let vars =
     List.fold atoms ~init:Int.Set.empty ~f:(fun acc {x; y; _} ->
       Set.add (Set.add acc x) y)
@@ -163,7 +170,7 @@ let solve (atoms : atom list) : 'k Solution.t =
   let rec loop dist =
     if Queue.is_empty q then
       Solution.Sat (
-        Model.of_local dist ~lookup:Map.find
+        Model.of_local dist ~lookup:Map.find ~keys:(Map.keys dist)
       )
     else begin
       let u = Queue.dequeue_exn q in
@@ -204,3 +211,40 @@ let solve (atoms : atom list) : 'k Solution.t =
   loop dist
 ;;
 
+let extend
+  (formula : (bool, 'k) Formula.t)
+  (solution_state : 'k Model.t)
+  : 'k Model.t
+=
+  let atoms : atom list =
+    extract formula
+  in
+
+  match check atoms with
+  | Solution.Unsat
+  | Solution.Unknown ->
+      failwith "Diff.extend: check returned Unsat/Unknown (invariant violated)"
+
+  | Solution.Sat graph ->
+      Model.fold graph
+        ~init:solution_state
+        ~f:(fun acc ~key ~data ->
+          let sym = (Utils.Separate.I key) in
+          match acc.value sym with
+          | Some _ ->
+            acc
+          | None ->
+              {
+                value =
+                  (fun (type a) (s : (a, 'k) Symbol.t) ->
+                     match s with
+                     | I k when k = key ->
+                         Some (Obj.magic data : a)
+                     | _ ->
+                         acc.value s
+                  );
+
+                keys =
+                  key :: acc.keys
+              }
+        )
