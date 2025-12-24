@@ -169,8 +169,13 @@ let check (atoms : atom list) : 'k Solution.t =
   );
   let rec loop dist =
     if Queue.is_empty q then
+      let keys =
+        (* Remove sentinel node *)
+        Map.keys dist
+        |> List.filter ~f:(fun v -> v <> 0)
+      in
       Solution.Sat (
-        Model.of_local dist ~lookup:Map.find ~keys:(Map.keys dist)
+        Model.of_local dist ~lookup:Map.find ~keys
       )
     else begin
       let u = Queue.dequeue_exn q in

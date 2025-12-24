@@ -39,7 +39,9 @@ let run_hybrid expr (vars : _ AsciiSymbol.t list) ~i =
   (* print the result *)
   (match result with
    | Solution.Sat model ->
-      printf "Have %d keys\n" (List.length model.keys);
+      printf "Have %d keys: %s\n" (List.length model.keys) (List.to_string model.keys ~f:(fun uid -> (
+        Char.to_string (Char.of_int_exn uid)
+      )));
       Model.to_string model vars ~pp_assignment:(
         fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
       )
