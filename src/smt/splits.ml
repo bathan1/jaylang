@@ -55,5 +55,4 @@ let neq : 'k Formula.split_fn = function
       Binop (Less_than, Key (I x), Key (I y)),
       Binop (Greater_than, Key (I x), Key (I y))
     )
-  | _ -> 
-    None
+  | _ -> None

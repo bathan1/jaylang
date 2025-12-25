@@ -396,9 +396,9 @@ let branch splits conjunction =
         | split :: ss ->
           match split x with
           | Some (left, right) ->
-              Some (left, right, rest)
+            Some (left, right, rest)
           | None ->
-              try_splitters ss
+            try_splitters ss
       in
       try_splitters splits
   in
@@ -428,6 +428,8 @@ module Make_solver (X : SOLVABLE) = struct
   let rec solve ?(tries_left = 100) (exprs : (bool, 'k) t list) : 'k Solution.t =
     if tries_left <= 0 then
       Solution.Unknown
+    else if List.is_empty X.logics then
+      X.solve [M.transform (and_ exprs)]
     else
       exprs
       |> and_
@@ -435,53 +437,52 @@ module Make_solver (X : SOLVABLE) = struct
       | Const_bool true -> Solution.Sat Model.empty
       | Const_bool false -> Solution.Unsat
       | e ->
-        if List.is_empty X.logics then
-          X.solve [M.transform e]
+        let theory_unsat =
+          List.exists X.logics ~f:(fun (module L) ->
+            match L.check (L.extract e) with
+            | Unsat -> true
+            | _ -> false
+          )
+        in
+        if theory_unsat then
+          Solution.Unsat
         else
-          let theory_unsat =
-            List.exists X.logics ~f:(fun (module L) ->
-              match L.check (L.extract e) with
-              | Unsat -> true
-              | _ -> false
-            )
-          in
-          if theory_unsat then
-            Solution.Unsat
-          else
-            (* Then it MIGHT be satisfiable, we have to check... *)
-            match branch X.splits e with
-            | None ->
-              let model =
-                List.fold X.logics
-                  ~init:Model.empty
-                  ~f:(fun acc (module L) ->
-                    L.extend e acc
-                  )
-              in
-              Solution.Sat model
-            | Some (left, right, rest) ->
-              let left_branch =
-                match rest with
-                | And xs -> And (left :: xs)
-                | _ -> And [left; rest]
-              in
+          (* Then it MIGHT be satisfiable, we have to check... *)
+          match branch X.splits e with
+          | None ->
+            (* No formula(s) to split on means we can treat
+               what we have as our current formula state as a strict conjunction. *)
+            let model =
+              List.fold X.logics
+                ~init:Model.empty
+                ~f:(fun acc (module L) ->
+                  L.extend e acc
+                )
+            in
+            Solution.Sat model
+          | Some (left, right, rest) ->
+            (* Caller (this context) explicitly makes the [And] conjunction between the split
+               left and right formulas and the [rest] formula. *)
+            let left_branch =
+              match rest with
+              | And xs -> And (left :: xs)
+              | _ -> And [left; rest]
+            in
 
-              let right_branch =
-                match rest with
-                | And xs -> And (right :: xs)
-                | _ -> And [right; rest]
-              in
+            let right_branch =
+              match rest with
+              | And xs -> And (right :: xs)
+              | _ -> And [right; rest]
+            in
 
-              begin
-                match solve [left_branch] with
-                | Solution.Sat m ->
-                  Solution.Sat m
+            match solve [left_branch] with
+            | Solution.Sat m ->
+              Solution.Sat m
 
-                | Solution.Unsat ->
-                  solve [right_branch]
+            | Solution.Unsat ->
+              solve [right_branch]
 
-                | Solution.Unknown ->
-                  X.solve [M.transform e]
-                end
+            | Solution.Unknown ->
+              X.solve [M.transform e]
 end
 
