@@ -3,103 +3,87 @@ open Overlays
 open Smt
 open Smt.Symbol
 
+(* ---------- Symbols ---------- *)
+
 let symbol = AsciiSymbol.make_int
-let a = symbol 'a' and b = symbol 'b'
-and c = symbol 'c' and d = symbol 'd'
+let a = symbol 'a'
+and b = symbol 'b'
+and c = symbol 'c'
+and d = symbol 'd'
 and e = symbol 'e'
 
-module Backend_z3 = Formula.Make_solver(Typed_z3)
+(* ---------- Solvers ---------- *)
+
+module Backend_z3 = Formula.Make_solver (Typed_z3)
 
 module Hybrid_z3 = Formula.Make_solver (struct
   include Typed_z3
   let logics : (module Formula.LOGIC) list = [
     (module Diff)
   ]
-  let splits = [Splits.lucky_guess]
+  let splits = [Splits.neq]
 end)
 
-let run_hybrid expr (vars : _ AsciiSymbol.t list) ~i =
-  let start_time = Time_ns.now () in
-  printf "(%d) Hybrid solve on: %s\n"
-    i
-    (
-      Formula.to_string expr ~key:(
-        fun uid -> (
-          uid
-          |> Char.of_int_exn
-          |> Char.to_string
-        )
-    ));
+(* ---------- Timing + Result ---------- *)
 
-  let result = Hybrid_z3.solve [expr] in
+type 'k solver_result = {
+  name   : string;
+  time   : Time_ns.Span.t;
+  result : 'k Solution.t;
+}
 
-  let duration = Time_ns.(diff (now ()) start_time) in
-  let duration_str = Time_ns.Span.to_string_hum duration in
+let solve_with_time ~name solve expr =
+  let start = Time_ns.now () in
+  let result = solve [expr] in
+  let time = Time_ns.(diff (now ()) start) in
+  { name; time; result }
 
-  (* print the result *)
-  (match result with
+let print_result solver vars r =
+  let time_str = Time_ns.Span.to_string_hum r.time in
+  printf "%s:\n" solver;
+
+  (match r.result with
    | Solution.Sat model ->
-      printf "Have %d keys: %s\n" (List.length model.keys) (List.to_string model.keys ~f:(fun uid -> (
-        Char.to_string (Char.of_int_exn uid)
-      )));
-      Model.to_string model vars ~pp_assignment:(
-        fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
-      )
-      |> printf "SAT:\n%s\n";
-   | Solution.Unsat -> printf "UNSAT\n"
-   | Solution.Unknown -> printf "UNKNOWN\n");
+       printf "  SAT\n";
+       Model.to_string model vars
+         ~pp_assignment:(fun (I uid) v ->
+           sprintf "    %c => %d" (Char.of_int_exn uid) v
+         )
+       |> printf "%s\n"
+   | Solution.Unsat ->
+       printf "  UNSAT\n"
+   | Solution.Unknown ->
+       printf "  UNKNOWN\n");
 
-  printf "⏱  Solve time: %s\n\n" duration_str
+  printf "  Time: %s\n\n" time_str
 
-let _run_backend expr (vars : int AsciiSymbol.t list) ~i =
-  let start_time = Time_ns.now () in
+let print_comparison r1 r2 =
+  let open Time_ns.Span in
+  let diff = abs (r1.time - r2.time) in
+  let diff_str = to_string_hum diff in
 
-  printf "(%d) Backend solve on: %s\n"
-    i
-    (Formula.to_string expr ~key:(fun uid ->
-       uid |> Char.of_int_exn |> Char.to_string));
+  let winner =
+    if r1.time < r2.time then r1.name
+    else if r2.time < r1.time then r2.name
+    else "Tie"
+  in
 
-  let result = Backend_z3.solve [expr] in
+  printf "🏁 Winner: %s (Δ %s)\n\n" winner diff_str
 
-  let duration = Time_ns.(diff (now ()) start_time) in
-  let duration_str = Time_ns.Span.to_string_hum duration in
-
-  (* print the result *)
-  (match result with
-   | Solution.Sat model ->
-        Model.to_string model vars ~pp_assignment:(
-          fun (I uid) v -> sprintf "  %c => %d" (Char.of_int_exn uid) v
-        )
-        |> printf "SAT:\n%s\n";
-   | Solution.Unsat -> printf "UNSAT\n"
-   | Solution.Unknown -> printf "UNKNOWN\n");
-
-  printf "⏱  Solve time: %s\n\n" duration_str
-
-let _ =
-  "
-  1. (a = 123456)
-  2. (not (b = a))
-  3. (not (b = a)) ^ (d = c)
-  4. (a = 123456) ^ (b = 123456)
-  5. (a = 123456) ^ (not (b = 123456)) ^ (c = 123456)
-  6. (a = 123456) ^ (b = 123456) ^ (c = 123456)
-  7. (b < a) ^ (not (c = 123456)) ^ (not (d = 123456)) ^ (e = 123456)
-  8. (a = 123456) ^ (not (b = 123456)) ^ (c = 123456) ^ (d = 123456)
-  9. (a = 123456) ^ (b = 123456) ^ (not (c = 123456)) ^ (d = 123456)
-  10. (a = 123456) ^ (b = 123456) ^ (c = 123456) ^ (d = 123456)"
+(* ---------- Test Expressions ---------- *)
 
 let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
+
   (* 1 *)
   Binop (Equal, Key a, Const_int 123456);
 
   (* 2 *)
-  Not (Binop (Equal, Key a, Key b));
+  Not (Binop (Equal, Key b, Key a));
 
   (* 3 *)
   And [
     Not (Binop (Equal, Key b, Key a));
-    Binop (Equal, Key d, Key c)
+    Binop (Equal, Key d, Key c);
   ];
 
   (* 4 *)
@@ -154,6 +138,7 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
     Binop (Equal, Key d, Const_int 123456);
   ];
 
+  (* 11 *)
   And [
     Binop (Less_than_eq, Key a, Const_int 123456);
     Not (Binop (Equal, Key a, Const_int 123456));
@@ -161,10 +146,35 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
   ];
 ]
 
+(* ---------- Main ---------- *)
+
 let () =
   exprs
-  |> List.iteri ~f:(
-    fun i expr ->
-      run_hybrid ~i:(i + 1) expr [a; b; c; d; e];
-      (* run_backend ~i:(i + 1) expr [a; b; c; d; e;] *)
-  )
+  |> List.iteri ~f:(fun i expr ->
+       printf "====================================\n";
+       printf "(%d) %s\n\n"
+         (i + 1)
+         (Formula.to_string expr
+            ~key:(fun uid ->
+              uid |> Char.of_int_exn |> Char.to_string));
+
+       let hybrid =
+         solve_with_time
+           ~name:"Hybrid"
+           Hybrid_z3.solve
+           expr
+       in
+
+       let backend =
+         solve_with_time
+           ~name:"Backend"
+           Backend_z3.solve
+           expr
+       in
+
+       print_result "Hybrid" [a; b; c; d; e] hybrid;
+       print_result "Backend" [a; b; c; d; e] backend;
+
+       print_comparison hybrid backend
+     )
+

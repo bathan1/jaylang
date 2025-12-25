@@ -364,6 +364,10 @@ let rec to_string : type a k. ?key:(int -> string) -> (a, k) t -> string =
     in
     sprintf "(%s %s %s)" (to_string e1 ~key) op_str (to_string e2 ~key)
 
+let as_conjunction = function
+  | And xs -> xs
+  | e -> [e]
+
 (** Maybe branch on an unresolved literal in [(bool, 'k) t] of CONJUNCTIONS 
     ({!And}) based on the rules encoded in the [(module SPLIT) list] SPLITS, 
     if such a branch exists.
@@ -375,30 +379,30 @@ let rec to_string : type a k. ?key:(int -> string) -> (a, k) t -> string =
       - [RESULT[2] = expression with the literal removed.]
     And RESULT is just the very {b first} split function that returns [Some] result.
 *)
-let branch
-  (splits : 'k split_fn list)
-  (conjunction : (bool, 'k) t)
-  : ((bool, 'k) t * (bool, 'k) t * (bool, 'k) t) option =
-  match conjunction with
-  | And exprs ->
-    let rec aux acc = function
-      | [] -> None
-      | x :: xs ->
-        let rest = And (List.rev_append acc xs) in
-        let rec try_splitters = function
-          | [] ->
-            aux (x :: acc) xs
-          | split :: ss ->
-            match split x with
-            | Some (left, right) ->
+let branch splits conjunction =
+  let exprs = as_conjunction conjunction in
+
+  let rec aux acc = function
+    | [] -> None
+    | x :: xs ->
+      let rest =
+        match List.rev_append acc xs with
+        | [] -> Const_bool true
+        | [e] -> e
+        | es -> And es
+      in
+      let rec try_splitters = function
+        | [] -> aux (x :: acc) xs
+        | split :: ss ->
+          match split x with
+          | Some (left, right) ->
               Some (left, right, rest)
-            | None ->
+          | None ->
               try_splitters ss
-        in
-        try_splitters splits
-    in
-    aux [] exprs
-  | _ -> None
+      in
+      try_splitters splits
+  in
+  aux [] exprs
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
@@ -444,6 +448,7 @@ module Make_solver (X : SOLVABLE) = struct
           if theory_unsat then
             Solution.Unsat
           else
+            (* Then it MIGHT be satisfiable, we have to check... *)
             match branch X.splits e with
             | None ->
               let model =
