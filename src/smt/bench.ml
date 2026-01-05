@@ -1,3 +1,6 @@
+[@@@ocaml.warning "-26"]
+[@@@ocaml.warning "-32"]
+
 open Core
 open Overlays
 open Smt
@@ -72,7 +75,7 @@ let print_comparison r1 r2 =
 
 (* ---------- Test Expressions ---------- *)
 
-let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
+let _exprs : (bool, int AsciiSymbol.t) Formula.t list = [
 
   (* 1 *)
   Binop (Equal, Key a, Const_int 123456);
@@ -141,33 +144,74 @@ let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
 
 (* ---------- Main ---------- *)
 
+(* let () = *)
+(*   Boolean.from_stdin () *)
+(*   |> List.map ~f:Boolean.parse *)
+(*   |> List.iteri ~f:(fun i expr -> *)
+(*        printf "====================================\n"; *)
+(*        printf "(%d) %s\n\n" *)
+(*          (i + 1) *)
+(*          (Formula.to_string expr *)
+(*             ~key:(fun uid -> *)
+(*               uid |> Char.of_int_exn |> Char.to_string)); *)
+(**)
+(*        let hybrid = *)
+(*          solve_with_time *)
+(*            ~name:"Hybrid" *)
+(*            Hybrid_z3.solve *)
+(*            expr *)
+(*        in *)
+(**)
+(*        let backend = *)
+(*          solve_with_time *)
+(*            ~name:"Backend" *)
+(*            Backend_z3.solve *)
+(*            expr *)
+(*        in *)
+(**)
+(*        print_result "Hybrid" [a; b; c; d; e] hybrid; *)
+(*        print_result "Backend" [a; b; c; d; e] backend; *)
+(**)
+(*        print_comparison hybrid backend *)
+(*      ) *)
+
 let () =
-  exprs
-  |> List.iteri ~f:(fun i expr ->
-       printf "====================================\n";
-       printf "(%d) %s\n\n"
-         (i + 1)
-         (Formula.to_string expr
-            ~key:(fun uid ->
-              uid |> Char.of_int_exn |> Char.to_string));
-
-       let hybrid =
-         solve_with_time
-           ~name:"Hybrid"
-           Hybrid_z3.solve
-           expr
-       in
-
-       let backend =
-         solve_with_time
-           ~name:"Backend"
-           Backend_z3.solve
-           expr
-       in
-
-       print_result "Hybrid" [a; b; c; d; e] hybrid;
-       print_result "Backend" [a; b; c; d; e] backend;
-
-       print_comparison hybrid backend
-     )
-
+  let formulae = Boolean.from_stdin () in
+  Stdlib.List.iteri
+    (fun idx f ->
+      try
+        let ast = Boolean.parse f in
+  print_endline (Formula.to_string ~key:Boolean.stringify ast);
+        let result = Hybrid_z3.solve [ast] in
+        match result with
+        | Solution.Sat model ->
+            Printf.printf "SAT\n";
+            let vars = (
+              Core.List.map model.keys ~f:(fun uid ->
+                uid |> Core.Char.of_int_exn |> AsciiSymbol.make_int
+              )
+            )
+            in
+            Model.to_string model vars
+              ~pp_assignment:(fun (I uid) v ->
+                Printf.sprintf "    %c => %d" (Core.Char.of_int_exn uid) v
+              )
+            |> Printf.printf "%s\n"
+        | Solution.Unsat ->
+            Printf.printf "UNSAT\n"
+        | Solution.Unknown ->
+            Printf.printf "UNKNOWN\n";
+    with
+    | Boolean.Lex_error (pos, msg) ->
+        Printf.eprintf
+          "[error] formula %d: lex error at %d: %s\n  input: %s\n"
+          (idx + 1) pos msg f
+    | Boolean.Parse_error (pos, msg) ->
+        Printf.eprintf
+          "[error] formula %d: parse error at %d: %s\n  input: %s\n"
+          (idx + 1) pos msg f
+    | exn ->
+        Printf.eprintf
+          "[error] formula %d: %s\n  input: %s\n"
+          (idx + 1) (Stdlib.Printexc.to_string exn) f)
+  formulae
