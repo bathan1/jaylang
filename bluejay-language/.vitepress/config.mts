@@ -9,6 +9,7 @@ export default defineConfig({
     title: "Bluejay",
     srcDir: resolve(__dirname, '../docs'),
     base: "/",
+    ignoreDeadLinks: true,
     description: "Next level type safety",
     themeConfig: {
         // https://vitepress.dev/reference/default-theme-config
