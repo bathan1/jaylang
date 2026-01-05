@@ -1,10 +1,12 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # ---------- Config ----------
 CSV_FILE = "bench.csv"
-BIN_SIZE = 100 # first 20, next 20, etc.
+BIN_SIZE = 100  # first 100, next 100, etc.
+OUTPUT_PATH = Path("../../bluejay-language/docs/public/difference_binned.png")
 
 # ---------- Load ----------
 df = pd.read_csv(CSV_FILE)
@@ -47,7 +49,7 @@ labels = [
 x = np.arange(len(grouped))
 width = 0.6
 
-plt.figure(figsize=(18, 8))
+plt.figure(figsize=(20, 8))
 
 plt.bar(
     x,
@@ -77,8 +79,9 @@ for i, row in grouped.iterrows():
     plt.text(i, b, f"{b:.0f}µs", ha="center", va="bottom", fontsize=8)
     plt.text(i, h, f"{h:.0f}µs", ha="center", va="bottom", fontsize=8)
 
-    delta_y = b * 0.55          # mid–upper bar
-    delta_y = max(delta_y, 12) # never too close to bottom
+    # Delta inside backend bar
+    delta_y = b * 0.55
+    delta_y = max(delta_y, 12)
 
     plt.text(
         i,
@@ -97,7 +100,15 @@ plt.xlabel("Formula buckets (fixed-size, sorted by backend runtime)")
 plt.ylabel("Mean solve time (µs)")
 plt.title("Hybrid vs Backend Solve Time (Order-Based Bins)")
 plt.legend()
-plt.tight_layout()
+
+plt.margins(x=0)
 plt.xlim(-0.6, len(grouped) - 0.4)
+plt.tight_layout()
+
+# ---------- Save ----------
+OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+plt.savefig(OUTPUT_PATH, dpi=200, bbox_inches="tight")
+
+# ---------- Show ----------
 plt.show()
 
