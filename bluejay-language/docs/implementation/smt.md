@@ -139,7 +139,7 @@ Benchmarks are just benchmarks, but they still matter for us.
 
 ### Binned Averages
 The following graph shows [`solve`]() runtimes (in microseconds) for 760 formulas for both the mini-solver and Z3,
-grouped in bins of 150.
+grouped in bins of 200.
 
 Then it takes the average runtimes of each bin and plots it in a barchart, sorted in ascending order of the Z3 runtime
 averages.
