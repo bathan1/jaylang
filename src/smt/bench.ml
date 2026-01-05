@@ -27,6 +27,11 @@ module Hybrid_z3 = Formula.Make_solver (struct
   let splits = [Splits.neq]
 end)
 
+let vars_of_model (model : 'k Model.t) =
+  Core.List.map model.keys ~f:(fun uid ->
+    uid |> Core.Char.of_int_exn |> AsciiSymbol.make_int
+  )
+
 (* ---------- Timing + Result ---------- *)
 
 type 'k solver_result = {
@@ -75,7 +80,7 @@ let print_comparison r1 r2 =
 
 (* ---------- Test Expressions ---------- *)
 
-let _exprs : (bool, int AsciiSymbol.t) Formula.t list = [
+let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
 
   (* 1 *)
   Binop (Equal, Key a, Const_int 123456);
@@ -178,40 +183,59 @@ let _exprs : (bool, int AsciiSymbol.t) Formula.t list = [
 let () =
   let formulae = Boolean.from_stdin () in
   Stdlib.List.iteri
-    (fun idx f ->
+    (fun idx input ->
+      printf "====================================\n";
+      printf "(%d) %s\n\n" (idx + 1) input;
+
       try
-        let ast = Boolean.parse f in
-  print_endline (Formula.to_string ~key:Boolean.stringify ast);
-        let result = Hybrid_z3.solve [ast] in
-        match result with
-        | Solution.Sat model ->
-            Printf.printf "SAT\n";
-            let vars = (
-              Core.List.map model.keys ~f:(fun uid ->
-                uid |> Core.Char.of_int_exn |> AsciiSymbol.make_int
-              )
-            )
-            in
-            Model.to_string model vars
-              ~pp_assignment:(fun (I uid) v ->
-                Printf.sprintf "    %c => %d" (Core.Char.of_int_exn uid) v
-              )
-            |> Printf.printf "%s\n"
-        | Solution.Unsat ->
-            Printf.printf "UNSAT\n"
-        | Solution.Unknown ->
-            Printf.printf "UNKNOWN\n";
-    with
-    | Boolean.Lex_error (pos, msg) ->
-        Printf.eprintf
-          "[error] formula %d: lex error at %d: %s\n  input: %s\n"
-          (idx + 1) pos msg f
-    | Boolean.Parse_error (pos, msg) ->
-        Printf.eprintf
-          "[error] formula %d: parse error at %d: %s\n  input: %s\n"
-          (idx + 1) pos msg f
-    | exn ->
-        Printf.eprintf
-          "[error] formula %d: %s\n  input: %s\n"
-          (idx + 1) (Stdlib.Printexc.to_string exn) f)
-  formulae
+        let ast = Boolean.parse input in
+
+        printf "Parsed:\n  %s\n\n"
+          (Formula.to_string ast ~key:Boolean.stringify);
+
+        (* --- Solve with Hybrid --- *)
+        let hybrid =
+          solve_with_time
+            ~name:"Hybrid"
+            Hybrid_z3.solve
+            ast
+        in
+
+        (* --- Solve with Backend --- *)
+        let backend =
+          solve_with_time
+            ~name:"Backend"
+            Backend_z3.solve
+            ast
+        in
+        (* Prefer vars from Hybrid if available *)
+        let vars =
+          match hybrid.result with
+          | Solution.Sat model when not (List.is_empty model.keys) ->
+              vars_of_model model
+          | _ ->
+              []   (* fallback for UNSAT / UNKNOWN *)
+        in
+        print_result "Hybrid" vars hybrid;
+        print_result "Backend" vars backend;
+
+        (* --- Comparison --- *)
+        print_comparison hybrid backend
+
+      with
+      | Boolean.Lex_error (pos, msg) ->
+          Printf.eprintf
+            "[error] formula %d: lex error at %d: %s\n  input: %s\n"
+            (idx + 1) pos msg input
+
+      | Boolean.Parse_error (pos, msg) ->
+          Printf.eprintf
+            "[error] formula %d: parse error at %d: %s\n  input: %s\n"
+            (idx + 1) pos msg input
+
+      | exn ->
+          Printf.eprintf
+            "[error] formula %d: %s\n  input: %s\n"
+            (idx + 1) (Stdlib.Printexc.to_string exn) input
+    )
+    formulae
