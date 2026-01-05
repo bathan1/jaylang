@@ -5,7 +5,7 @@ from pathlib import Path
 
 # ---------- Config ----------
 CSV_FILE = "bench.csv"
-BIN_SIZE = 100  # first 100, next 100, etc.
+BIN_SIZE = 200
 OUTPUT_PATH = Path("../../bluejay-language/docs/public/difference_binned.png")
 
 # ---------- Load ----------
@@ -49,13 +49,13 @@ labels = [
 x = np.arange(len(grouped))
 width = 0.6
 
-plt.figure(figsize=(20, 8))
+plt.figure(figsize=(16, 8))
 
 plt.bar(
     x,
     grouped["backend_mean"],
     width=width,
-    label="Backend",
+    label="Z3",
     color="red",
     alpha=0.6
 )
@@ -64,7 +64,7 @@ plt.bar(
     x,
     grouped["hybrid_mean"],
     width=width,
-    label="Hybrid",
+    label="Mini",
     color="green",
     alpha=0.6
 )
@@ -98,7 +98,7 @@ for i, row in grouped.iterrows():
 plt.xticks(x, labels, rotation=45, ha="right")
 plt.xlabel("Formula buckets (fixed-size, sorted by backend runtime)")
 plt.ylabel("Mean solve time (µs)")
-plt.title("Hybrid vs Backend Solve Time (Order-Based Bins)")
+plt.title("Mini vs Z3 Solve Time (Order-Based Bins)")
 plt.legend()
 
 plt.margins(x=0)

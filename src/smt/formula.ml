@@ -436,10 +436,11 @@ module Make_solver (X : SOLVABLE) = struct
       |> function
       | Const_bool true -> Solution.Sat Model.empty
       | Const_bool false -> Solution.Unsat
-      | e ->
+      (* #region solve_check *)
+      | formula ->
         let theory_unsat =
-          List.exists X.logics ~f:(fun (module L) ->
-            match L.check (L.extract e) with
+          List.exists X.logics ~f:(fun (module Logic) ->
+            match Logic.check (Logic.extract formula) with
             | Unsat -> true
             | _ -> false
           )
@@ -448,7 +449,11 @@ module Make_solver (X : SOLVABLE) = struct
           Solution.Unsat
         else
           (* Then it MIGHT be satisfiable, we have to check... *)
-          match branch X.splits e with
+          (* #endregion solve_check *)
+
+          match branch X.splits formula with
+
+          (* #region solve_branch_leaf *)
           | None ->
             (* No formula(s) to split on means we can treat
                what we have as our current formula state as a strict conjunction. *)
@@ -456,10 +461,13 @@ module Make_solver (X : SOLVABLE) = struct
               List.fold X.logics
                 ~init:Model.empty
                 ~f:(fun acc (module L) ->
-                  L.extend e acc
+                  L.extend formula acc
                 )
             in
             Solution.Sat model
+          (* #endregion solve_branch_leaf *)
+
+          (* #region solve_branch_exists *)
           | Some (left, right, rest) ->
             (* Caller (this context) explicitly makes the [And] conjunction between the split
                left and right formulas and the [rest] formula. *)
@@ -474,15 +482,18 @@ module Make_solver (X : SOLVABLE) = struct
               | And xs -> And (right :: xs)
               | _ -> And [right; rest]
             in
+        (* #endregion solve_branch_exists *)
 
+            (* #region solve_try *)
             match solve [left_branch] with
-            | Solution.Sat m ->
-              Solution.Sat m
+            | Solution.Sat model ->
+              Solution.Sat model
 
             | Solution.Unsat ->
               solve [right_branch]
 
             | Solution.Unknown ->
-              X.solve [M.transform e]
+              X.solve [M.transform formula]
+            (* #endregion solve_try *)
 end
 

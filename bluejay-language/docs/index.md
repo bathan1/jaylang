@@ -8,7 +8,7 @@ hero:
   tagline: Type safety on a new level
   actions:
     - theme: brand
-      text: Markdown Examples
+      text: Get Started
       link: /language/bluejay.md
     - theme: alt
       text: API Examples
