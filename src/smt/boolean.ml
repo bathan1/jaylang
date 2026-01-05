@@ -148,6 +148,17 @@ let rec paren_contains_cmp toks i depth =
     | CMP _ when depth = 1 -> true
     | _ -> paren_contains_cmp toks (i + 1) depth
 
+let rec find_matching_rp toks i depth =
+  if i >= Array.length toks then None
+  else
+    match toks.(i).kind with
+    | LP -> find_matching_rp toks (i + 1) (depth + 1)
+    | RP ->
+        if depth = 1 then Some i
+        else find_matching_rp toks (i + 1) (depth - 1)
+    | _ ->
+        find_matching_rp toks (i + 1) depth
+
 (* Forward decls *)
 let rec parse_or (p : parser) : (bool, 'k) Formula.t =
   let left = parse_and p in
@@ -258,14 +269,30 @@ and parse_unary (p : parser) : (int, 'k) Formula.t =
 and parse_bool_primary (p : parser) : (bool, 'k) Formula.t =
   match (cur p).kind with
   | LP ->
-      (* Boolean parentheses ALWAYS *)
-      advance p;
-      let e = parse_or p in
-      expect p RP;
-      e
+      begin
+        match find_matching_rp p.toks p.i 0 with
+        | Some j when j + 1 < Array.length p.toks ->
+            begin
+              match p.toks.(j + 1).kind with
+              | CMP _ ->
+                  (* This '(' is the left operand of a comparison *)
+                  parse_compare p
+              | _ ->
+                  (* This is a true boolean parenthesis *)
+                  advance p;
+                  let e = parse_or p in
+                  expect p RP;
+                  e
+            end
+        | _ ->
+            (* Fallback: boolean parentheses *)
+            advance p;
+            let e = parse_or p in
+            expect p RP;
+            e
+      end
 
   | ID s ->
-      (* Either a boolean variable or a comparison *)
       begin
         match p.toks.(p.i + 1).kind with
         | CMP _ ->
