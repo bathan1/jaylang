@@ -32,6 +32,14 @@ let vars_of_model (model : 'k Model.t) =
     uid |> Core.Char.of_int_exn |> AsciiSymbol.make_int
   )
 
+let model_to_string model =
+  Model.to_string model (vars_of_model model)
+    ~pp_assignment:(fun (I uid) v ->
+      Printf.sprintf "%c => %d"
+        (Core.Char.of_int_exn uid)
+        v
+    )
+
 (* ---------- Timing + Result ---------- *)
 
 type 'k solver_result = {
@@ -39,6 +47,37 @@ type 'k solver_result = {
   time   : Time_ns.Span.t;
   result : 'k Solution.t;
 }
+
+let us_of_span (t : Time_ns.Span.t) : float =
+  Time_ns.Span.to_us t
+
+let csv_escape (s : string) : string =
+  "\"" ^ String.concat ~sep:"\"\"" (String.split s ~on:'"') ^ "\""
+
+let print_csv_row
+    ~id
+    ~formula_text
+    ~solution
+    ~model_text
+    ~hybrid
+    ~backend
+  =
+  let h_us = us_of_span hybrid.time in
+  let b_us = us_of_span backend.time in
+  let diff = h_us -. b_us in
+  let is_winner = if Stdlib.(<) diff 0.0 then 1 else 0 in
+
+  printf "%d,%s,%s,%s,%.3f,%.3f,%d,%.3f\n"
+    id
+    (csv_escape formula_text)
+    (csv_escape solution)
+    (csv_escape model_text)
+    h_us
+    b_us
+    is_winner
+    diff
+
+
 
 let solve_with_time ~name solve expr =
   let start = Time_ns.now () in
@@ -78,120 +117,22 @@ let print_comparison r1 r2 =
 
   printf "🏁 Winner: %s (Δ %s)\n\n" winner diff_str
 
-(* ---------- Test Expressions ---------- *)
-
-let exprs : (bool, int AsciiSymbol.t) Formula.t list = [
-
-  (* 1 *)
-  Binop (Equal, Key a, Const_int 123456);
-
-  (* 2 *)
-  Not (Binop (Equal, Key b, Key a));
-
-  (* 3 *)
-  And [
-    Not (Binop (Equal, Key b, Key a));
-    Binop (Equal, Key d, Key c);
-  ];
-
-  (* 4 *)
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Binop (Equal, Key b, Const_int 123456);
-  ];
-
-  (* 5 *)
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Not (Binop (Equal, Key b, Const_int 123456));
-    Binop (Equal, Key c, Const_int 123456);
-  ];
-
-  (* 6 *)
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Binop (Equal, Key b, Const_int 123456);
-    Binop (Equal, Key c, Const_int 123456);
-  ];
-
-  (* 7 *)
-  And [
-    Binop (Less_than, Key b, Key a);
-    Not (Binop (Equal, Key c, Const_int 123456));
-    Not (Binop (Equal, Key d, Const_int 123456));
-    Binop (Equal, Key e, Const_int 123456);
-  ];
-
-  (* 8 *)
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Not (Binop (Equal, Key b, Const_int 123456));
-    Binop (Equal, Key c, Const_int 123456);
-    Binop (Equal, Key d, Const_int 123456);
-  ];
-
-  (* 9 *)
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Binop (Equal, Key b, Const_int 123456);
-    Not (Binop (Equal, Key c, Const_int 123456));
-    Binop (Equal, Key d, Const_int 123456);
-  ];
-
-  (* 10 *)
-  And [
-    Binop (Equal, Key a, Const_int 123456);
-    Binop (Equal, Key b, Const_int 123456);
-    Binop (Equal, Key c, Const_int 123456);
-    Binop (Equal, Key d, Const_int 123456);
-  ];
-]
-
-(* ---------- Main ---------- *)
-
-(* let () = *)
-(*   Boolean.from_stdin () *)
-(*   |> List.map ~f:Boolean.parse *)
-(*   |> List.iteri ~f:(fun i expr -> *)
-(*        printf "====================================\n"; *)
-(*        printf "(%d) %s\n\n" *)
-(*          (i + 1) *)
-(*          (Formula.to_string expr *)
-(*             ~key:(fun uid -> *)
-(*               uid |> Char.of_int_exn |> Char.to_string)); *)
-(**)
-(*        let hybrid = *)
-(*          solve_with_time *)
-(*            ~name:"Hybrid" *)
-(*            Hybrid_z3.solve *)
-(*            expr *)
-(*        in *)
-(**)
-(*        let backend = *)
-(*          solve_with_time *)
-(*            ~name:"Backend" *)
-(*            Backend_z3.solve *)
-(*            expr *)
-(*        in *)
-(**)
-(*        print_result "Hybrid" [a; b; c; d; e] hybrid; *)
-(*        print_result "Backend" [a; b; c; d; e] backend; *)
-(**)
-(*        print_comparison hybrid backend *)
-(*      ) *)
-
 let () =
+  (* --- CSV header --- *)
+  printf
+    "id,formula_text,solution_text,model_text,hybrid_time,backend_only_time,is_hybrid_winner,hybrid_time_diff\n";
+
   let formulae = Boolean.from_stdin () in
+
   Stdlib.List.iteri
     (fun idx input ->
-      printf "====================================\n";
-      printf "(%d) %s\n\n" (idx + 1) input;
-
       try
+        (* --- Parse --- *)
         let ast = Boolean.parse input in
 
-        printf "Parsed:\n  %s\n\n"
-          (Formula.to_string ast ~key:Boolean.stringify);
+        let formula_text =
+          Formula.to_string ast ~key:Boolean.stringify
+        in
 
         (* --- Solve with Hybrid --- *)
         let hybrid =
@@ -208,19 +149,52 @@ let () =
             Backend_z3.solve
             ast
         in
-        (* Prefer vars from Hybrid if available *)
+
+        (* --- Prefer vars from Hybrid model --- *)
         let vars =
           match hybrid.result with
           | Solution.Sat model when not (List.is_empty model.keys) ->
               vars_of_model model
           | _ ->
-              []   (* fallback for UNSAT / UNKNOWN *)
+              []
         in
-        print_result "Hybrid" vars hybrid;
-        print_result "Backend" vars backend;
 
-        (* --- Comparison --- *)
-        print_comparison hybrid backend
+        (* --- Solution text --- *)
+        let solution_text =
+          match hybrid.result with
+          | Solution.Sat _ -> "SAT"
+          | Solution.Unsat -> "UNSAT"
+          | Solution.Unknown -> "UNKNOWN"
+        in
+
+        (* --- Model text (nullable) --- *)
+        let model_text =
+          match hybrid.result with
+          | Solution.Sat model ->
+              Model.to_string model vars
+                ~pp_assignment:(fun (I uid) v ->
+                  Printf.sprintf "%c => %d"
+                    (Char.of_int_exn uid) v
+                )
+          | _ -> ""
+        in
+
+        (* --- Timing + comparison --- *)
+        let h_us = us_of_span hybrid.time in
+        let b_us = us_of_span backend.time in
+        let diff = h_us -. b_us in
+        let is_winner = if Stdlib.(<) h_us b_us then 1 else 0 in
+
+        (* --- CSV row --- *)
+        printf "%d,%s,%s,%s,%.3f,%.3f,%d,%.3f\n"
+          (idx + 1)
+          (csv_escape formula_text)
+          (csv_escape solution_text)
+          (csv_escape model_text)
+          h_us
+          b_us
+          is_winner
+          diff
 
       with
       | Boolean.Lex_error (pos, msg) ->
@@ -236,6 +210,9 @@ let () =
       | exn ->
           Printf.eprintf
             "[error] formula %d: %s\n  input: %s\n"
-            (idx + 1) (Stdlib.Printexc.to_string exn) input
+            (idx + 1)
+            (Stdlib.Printexc.to_string exn)
+            input
     )
     formulae
+
