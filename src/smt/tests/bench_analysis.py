@@ -1,12 +1,17 @@
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 # ---------- Config ----------
-CSV_FILE = "bench.csv"
+if len(sys.argv) != 2:
+    print("usage: plot.py <bench.csv>", file=sys.stderr)
+    sys.exit(1)
+
+CSV_FILE = sys.argv[1]
 BIN_SIZE = 200
-OUTPUT_PATH = Path("../../bluejay-language/docs/public/difference_binned.png")
+OUTPUT_PATH = Path("../../../bluejay-language/docs/public/difference_binned.png")
 
 # ---------- Load ----------
 df = pd.read_csv(CSV_FILE)

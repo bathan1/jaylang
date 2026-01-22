@@ -117,10 +117,23 @@ let print_comparison r1 r2 =
 
   printf "🏁 Winner: %s (Δ %s)\n\n" winner diff_str
 
+let warmup_formula = Formula.Const_bool true
+
+let warmup () =
+  let _ =
+    Hybrid_z3.solve [warmup_formula]
+  in
+  let _ =
+    Backend_z3.solve [warmup_formula]
+  in
+  ()
+
 let () =
   (* --- CSV header --- *)
   printf
     "id,formula_text,solution_text,model_text,hybrid_time,backend_only_time,is_hybrid_winner,hybrid_time_diff\n";
+
+  warmup ();
 
   let formulae = Boolean.from_stdin () in
 
