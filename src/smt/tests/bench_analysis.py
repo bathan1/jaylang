@@ -16,7 +16,21 @@ OUTPUT_PATH = Path("../../../bluejay-language/docs/public/difference_binned.png"
 # ---------- Load ----------
 df = pd.read_csv(CSV_FILE)
 
-df["id"] = pd.to_numeric(df["id"])
+# Attempt numeric conversion
+id_numeric = pd.to_numeric(df["id"], errors="coerce")
+
+# Find bad rows
+bad_rows = df[id_numeric.isna()]
+
+if not bad_rows.empty:
+    print("ERROR: Non-numeric 'id' values detected:", file=sys.stderr)
+    for idx, row in bad_rows.iterrows():
+        print(f"\nRow {idx}:", file=sys.stderr)
+        print(row.to_string(), file=sys.stderr)
+    sys.exit(1)
+
+# Assign only after validation
+df["id"] = id_numeric
 df["hybrid_time"] = pd.to_numeric(df["hybrid_time"])
 df["backend_only_time"] = pd.to_numeric(df["backend_only_time"])
 

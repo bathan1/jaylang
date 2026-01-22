@@ -38,7 +38,7 @@ let tokenize (s : string) : token list =
       | ')' -> loop (i + 1) ({ kind = RP; pos = i } :: acc)
       | '^' -> loop (i + 1) ({ kind = AND; pos = i } :: acc)
       | '|' -> loop (i + 1) ({ kind = OR; pos = i } :: acc)
-      | '+' | '-' | '*' | '%' as c ->
+      | '+' | '-' | '*' | '%' | '/' as c ->
           (* Could be negative int if '-' followed by digit *)
           begin match c, peek (i + 1) with
           | '-', Some d when is_digit d ->
@@ -249,6 +249,12 @@ and parse_mul (p : parser) : (int, 'k) Formula.t =
         advance p;
         let rhs = parse_unary p in
         node := Formula.Binop (Binop.Modulus, !node, rhs);
+        loop ()
+
+    | ARITH '/' ->
+        advance p;
+        let rhs = parse_unary p in
+        node := Formula.Binop (Binop.Divide, !node, rhs);
         loop ()
 
     | _ ->
