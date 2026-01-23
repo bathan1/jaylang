@@ -404,6 +404,18 @@ let branch splits conjunction =
   in
   aux [] exprs
 
+let extract_all_keys : type a k. (a, k) t -> int list =
+  let rec go : type a k. (a, k) t -> int list = function
+    | Const_int _ -> []
+    | Const_bool _ -> []
+    | Key (I sym)
+      | Key (B sym) -> [sym]
+    | Not t -> go t
+    | And ts -> List.concat_map ts ~f:go
+    | Binop (_, lhs, rhs) -> go lhs @ go rhs
+  in
+  go
+
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
@@ -438,19 +450,47 @@ module Make_solver (X : SOLVABLE) = struct
       | Const_bool false -> Solution.Unsat
       (* #region solve_check *)
       | formula ->
-        let theory_unsat =
-          List.exists X.logics ~f:(fun (module Logic) ->
-            match Logic.check (Logic.extract formula) with
-            | Unsat -> true
-            | _ -> false
-          )
+        let formula_keys = extract_all_keys formula in
+        let theory_guard =
+          List.fold_until
+            X.logics
+            ~init:formula_keys
+            ~f:(fun remaining_keys (module Logic) ->
+              match Logic.check (Logic.extract formula) with
+              | Unsat ->
+                Stop Solution.Unsat
+
+              | Sat model ->
+                let remaining_keys =
+                  List.filter remaining_keys ~f:(fun k ->
+                    not (List.mem model.keys k ~equal:Int.equal))
+                in
+                Continue remaining_keys
+
+              | _ ->
+                Continue remaining_keys
+            )
+            ~finish:(fun remaining_keys ->
+              if List.is_empty remaining_keys then
+                Solution.Sat Model.empty (* Then this MAY be satisfiable, we have to recheck *)
+              else
+                Solution.Unknown
+            )
         in
-        if theory_unsat then
-          Solution.Unsat
-        else
+        match theory_guard with
+        | Solution.Unsat -> Solution.Unsat
+        | Solution.Unknown ->
+          let result = X.solve [M.transform formula]
+          in
+          begin match result with
+          | Solution.Sat model ->
+              Solution.Sat {value = model.value; keys = (extract_all_keys formula)}
+          | _ ->
+            result
+          end
+          | _ ->
           (* Then it MIGHT be satisfiable, we have to check... *)
           (* #endregion solve_check *)
-
           match branch X.splits formula with
 
           (* #region solve_branch_leaf *)
@@ -482,7 +522,7 @@ module Make_solver (X : SOLVABLE) = struct
               | And xs -> And (right :: xs)
               | _ -> And [right; rest]
             in
-        (* #endregion solve_branch_exists *)
+            (* #endregion solve_branch_exists *)
 
             (* #region solve_try *)
             match solve [left_branch] with
@@ -494,6 +534,6 @@ module Make_solver (X : SOLVABLE) = struct
 
             | Solution.Unknown ->
               X.solve [M.transform formula]
-            (* #endregion solve_try *)
+  (* #endregion solve_try *)
 end
 
