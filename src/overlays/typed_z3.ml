@@ -92,18 +92,24 @@ module Make_of_context (C : CONTEXT) : Formula.SOLVABLE = struct
     let e = and_ exprs in
     if Z3.Expr.equal e (const_bool false)
     then Unsat
-    else
-      match Z3.Solver.check solver [ e ] with
-      | Z3.Solver.SATISFIABLE ->
-        let model = Option.value_exn @@ Z3.Solver.get_model solver in
-        let value : type a. (a, 'k) Symbol.t -> a option = fun s ->
-          match s with
-          | I _ -> a_of_expr model (symbol s) unbox_int_expr
-          | B _ -> a_of_expr model (symbol s) unbox_bool_expr
-        in
-        Sat { value }
-      | UNKNOWN -> Unknown
-      | UNSATISFIABLE -> Unsat
+    else begin     
+      Z3.Solver.push solver;
+      let solution =
+        match Z3.Solver.check solver [ e ] with
+        | Z3.Solver.SATISFIABLE ->
+          let model = Option.value_exn @@ Z3.Solver.get_model solver in
+          let value : type a. (a, 'k) Symbol.t -> a option = fun s ->
+            match s with
+            | I _ -> a_of_expr model (symbol s) unbox_int_expr
+            | B _ -> a_of_expr model (symbol s) unbox_bool_expr
+          in
+          Solution.Sat { value }
+        | UNKNOWN -> Unknown
+        | UNSATISFIABLE -> Unsat
+      in
+      Z3.Solver.pop solver 1;
+      solution
+    end
 end
 
 module Make () = Make_of_context (struct let ctx = Z3.mk_context [] end)

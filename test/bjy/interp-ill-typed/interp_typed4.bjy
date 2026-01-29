@@ -68,6 +68,7 @@ end = struct
       | `TInt _ -> true
       | _ -> false
       end
+    | _ -> false
     end
 
   let is_int = eq type_int

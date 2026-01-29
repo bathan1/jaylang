@@ -33,3 +33,18 @@ let to_arithmetic (type a b) (binop : (a * a * b) t) : a -> a -> b =
   | Equal -> Poly.( = )
   | Not_equal -> Poly.( <> )
   | Or -> ( || )
+
+let to_string (type a b) (binop : (a * a * b) t) : string =
+  match binop with
+  | Plus -> "+"
+  | Minus -> "-"
+  | Times -> "*"
+  | Divide -> "/"
+  | Modulus -> "%"
+  | Less_than -> "<"
+  | Less_than_eq -> "<="
+  | Greater_than -> ">"
+  | Greater_than_eq -> ">="
+  | Equal -> "="
+  | Not_equal -> "<>"
+  | Or -> "||"
