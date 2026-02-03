@@ -144,7 +144,7 @@ let () =
         let ast = Boolean.parse input in
 
         let formula_text =
-          Formula.to_string ast ~key:Boolean.stringify
+          Formula.to_string ast
         in
 
         (* --- Solve with Hybrid --- *)

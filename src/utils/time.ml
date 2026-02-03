@@ -2,10 +2,9 @@
 open Core
 
 let time f x =
-  let t0 = Mtime_clock.now () in
+  let c = Mtime_clock.counter () in
   let res = f x in
-  let t1 = Mtime_clock.now () in
-  Mtime.span t0 t1, res
+  Mtime_clock.count c, res
 
 let span_to_ms =
   let ms_over_ns = Mtime.Span.to_float_ns Mtime.Span.ms /. Mtime.Span.to_float_ns Mtime.Span.ns in

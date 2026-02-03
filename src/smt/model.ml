@@ -224,4 +224,3 @@ let of_local (local : 'a) ~(keys : int list) ~(lookup : 'a -> int -> 'b option):
       );
     keys
   }
-
