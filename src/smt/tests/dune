@@ -1,7 +1,21 @@
 (executable
  (name bench)
  (public_name jay.smt.bench)
- (modules :standard)
+ (modules bench)
+ (libraries
+  core
+  preface
+  z3
+  utils
+  smt
+  overlays)
+ (preprocess
+  (pps ppx_compare ocaml-monadic)))
+
+(executable
+ (name dbg)
+ (public_name jay.smt.dbg)
+ (modules dbg)
  (libraries
   core
   preface

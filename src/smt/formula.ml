@@ -445,8 +445,10 @@ let extract_all_keys : type a k. (a, k) t -> int list =
 
 let append_line filename line =
   Out_channel.with_file ~append:true filename ~f:(fun oc ->
-    Out_channel.output_string oc (line ^ "%!");
-    Out_channel.newline oc)
+    Out_channel.output_string oc line;
+    Out_channel.newline oc;
+    Out_channel.flush oc
+  )
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
