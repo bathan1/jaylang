@@ -443,12 +443,12 @@ let extract_all_keys : type a k. (a, k) t -> int list =
   in
   go
 
-let append_line filename line =
-  Out_channel.with_file ~append:true filename ~f:(fun oc ->
-    Out_channel.output_string oc line;
-    Out_channel.newline oc;
-    Out_channel.flush oc
-  )
+(* let append_line filename line = *)
+(*   Out_channel.with_file ~append:true filename ~f:(fun oc -> *)
+(*     Out_channel.output_string oc line; *)
+(*     Out_channel.newline oc; *)
+(*     Out_channel.flush oc *)
+(*   ) *)
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
@@ -485,7 +485,7 @@ module Make_solver (X : SOLVABLE) = struct
       (* #region solve_check *)
       | formula ->
       (* maybe this should be an absolute path, but this works fine *)
-      append_line "./formulas.txt" (Format.sprintf "%s\n" (to_string formula));
+      (* append_line "./formulas.txt" (Format.sprintf "%s\n" (to_string formula)); *)
       (* or print the line to stdout like this: *)
       (* Format.printf "%s\n" (to_string e); *)
         let formula_keys = extract_all_keys formula in
@@ -499,6 +499,7 @@ module Make_solver (X : SOLVABLE) = struct
                 Stop Solution.Unsat
 
               | Sat model ->
+                printf "diff model solved %d keys\n" (List.length model.keys);
                 let remaining_keys =
                   List.filter remaining_keys ~f:(fun k ->
                     not (List.mem model.keys k ~equal:Int.equal))
@@ -510,7 +511,8 @@ module Make_solver (X : SOLVABLE) = struct
             )
             ~finish:(fun remaining_keys ->
               if List.is_empty remaining_keys then
-                Solution.Sat Model.empty (* Then this MAY be satisfiable, we have to recheck *)
+                (* Then this MAY be satisfiable, we have to recheck *)
+                Solution.Sat Model.empty 
               else
                 Solution.Unknown
             )
@@ -526,7 +528,7 @@ module Make_solver (X : SOLVABLE) = struct
           | _ ->
             result
           end
-          | _ ->
+        | Solution.Sat _ ->
           (* Then it MIGHT be satisfiable, we have to check... *)
           (* #endregion solve_check *)
           match branch X.splits formula with

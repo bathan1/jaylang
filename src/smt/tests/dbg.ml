@@ -1,22 +1,92 @@
 [@@@ocaml.warning "-26"]
+[@@@ocaml.warning "-27"]
 [@@@ocaml.warning "-32"]
 
 open Smt
 open Smt.Symbol
 
-let bad_input = "(((((((((((a - 1) - 1) - 1) - 1) - 1) - 1) - 1) - 1) - 1) - 1) <= 0) ^ (not ((((((((((a - 1) - 1) - 1) - 1) - 1) - 1) - 1) - 1) - 1) <= 0)) ^ (not (((((((((a - 1) - 1) - 1) - 1) - 1) - 1) - 1) - 1) <= 0)) ^ ((((((((a - 1) - 1) - 1) - 1) - 1) - 1) - 1) <= 0) ^ (not (((((((a - 1) - 1) - 1) - 1) - 1) - 1) <= 0)) ^ ((((((a - 1) - 1) - 1) - 1) - 1) <= 0) ^ (not (((((a - 1) - 1) - 1) - 1) <= 0)) ^ ((((a - 1) - 1) - 1) <= 0) ^ (not (((a - 1) - 1) <= 0)) ^ (not ((a - 1) <= 0)) ^ (not (a <= 0))"
+let x1 = AsciiSymbol.make_int 'a'
+let x2 = AsciiSymbol.make_int 'b'
+let x3 = AsciiSymbol.make_int 'c'
+let x4 = AsciiSymbol.make_int 'd'
 
-let ast = Boolean.parse bad_input
+let formula = Formula.And [
+  Formula.Binop (
+    Binop.Less_than_eq,
+    Key x1,
+    (
+      Formula.Binop (
+        Binop.Minus,
+        Key x3,
+        Const_int 5
+      )
+    )
+  );
+  Formula.Binop (
+    Binop.Less_than_eq,
+    Key x1,
+    (
+      Formula.Binop (
+        Binop.Minus,
+        Key x4,
+        Const_int 3
+      )
+    )
+  );
+  Formula.Binop (
+    Binop.Less_than_eq,
+    Key x2,
+    (
+      Formula.Binop (
+        Binop.Plus,
+        Key x1,
+        Const_int 3
+      )
+    )
+  );
+  Formula.Binop (
+    Binop.Less_than_eq,
+    Key x3,
+    (
+      Formula.Binop (
+        Binop.Plus,
+        Key x2,
+        Const_int 2
+      )
+    )
+  );
+  Formula.Binop (
+    Binop.Less_than_eq,
+    Key x3,
+    (
+      Formula.Binop (
+        Binop.Minus,
+        Key x4,
+        Const_int 1
+      )
+    )
+  );
+  Formula.Binop (
+    Binop.Less_than_eq,
+    Key x4,
+    (
+      Formula.Binop (
+        Binop.Plus,
+        Key x2,
+        Const_int 5
+      )
+    )
+  );
+]
 
-module Bluesclues = Formula.Make_solver (Overlays.Typed_z3)
-
-let result = Bluesclues.solve [ast];;
-
+module Solver = Smt.Formula.Make_solver (Overlays.Typed_z3)
 let () =
-  match result with
-  | Solution.Sat result -> 
-    let result_text = Model.to_string result [AsciiSymbol.make_int 'a'] ~pp_assignment:(fun (I k) v -> (
-      "%s => %s" (Int.to_string k) (Int.to_string v)
-    )) in
-    Printf.printf "%s\n", result_text;
-  | _ -> Printf.printf "unknown or unsat\n";
+  let solution = Solver.solve [formula] in
+  match solution with
+  | Solution.Sat model ->
+    Printf.printf "%s\n" (
+      Model.to_string model [x1; x2; x3; x4;]
+      ~pp_assignment:(fun (I x) v -> Printf.sprintf "%c => %d" (Char.chr x) v)
+    )
+  | _ ->
+    Printf.printf "UNSAT or UNKNOWN\n"

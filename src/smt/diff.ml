@@ -53,7 +53,7 @@ type atom = {
 let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   formula
   |> function
-    (* x = c -> (x - y <= c) and (0 - x) <= -c *)
+    (* x = c -> (x - 0 <= c) and (0 - y) <= -c *)
   | Binop (Equal, Key I x, Const_int c)
   | Binop (Equal, Const_int c, Key I x) ->
     [ { x; y = 0; c; };
@@ -111,11 +111,30 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Not Binop (Less_than_eq,    Key I y, Key I x) ->
       [{ x = y; y = x; c = -1 }]
 
+  (* x + c <= y  ->  x - y <= -c *)
+  | Binop (Less_than_eq, Binop (Plus, Key I x, Const_int c), Key I y)
+  | Binop (Less_than_eq, Binop (Plus, Const_int c, Key I x), Key I y) ->
+      [{ x; y; c = -c }]
+
+  (* y <= x + c  ->  y - x <= c *)
+  | Binop (Less_than_eq, Key I y, Binop (Plus, Key I x, Const_int c))
+  | Binop (Less_than_eq, Key I y, Binop (Plus, Const_int c, Key I x)) ->
+      [{ x = y; y = x; c }]
+
+  (* x - c <= y  ->  x - y <= c *)
+  | Binop (Less_than_eq, Binop (Minus, Key I x, Const_int c), Key I y) ->
+      [{ x; y; c }]
+
+  (* y <= x - c  ->  y - x <= -c *)
+  | Binop (Less_than_eq, Key I y, Binop (Minus, Key I x, Const_int c)) ->
+      [{ x = y; y = x; c = -c }]
+
   | And exprs ->
     exprs
     |> List.map ~f:extract
     |> List.concat
-  | _ -> []
+  | _ ->
+    []
 ;;
 
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
@@ -139,81 +158,65 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
     ]}
 *)
 let check (atoms : atom list) : 'k Solution.t =
+  (* collect variables *)
   let vars =
     List.fold atoms ~init:Int.Set.empty ~f:(fun acc {x; y; _} ->
       Set.add (Set.add acc x) y)
   in
-  let edges =
-    List.fold atoms ~init:Int.Map.empty ~f:(fun m {x; y; c} ->
-      let lst = Map.find m y |> Option.value ~default:[] in
-      Map.set m ~key:y ~data:((x, c) :: lst))
-  in
+
+  let vars = Set.add vars 0 in  (* sentinel node *)
+
+  let n = Set.length vars in
+
+  (* initialize all distances to 0 *)
   let dist =
     Set.fold vars ~init:Int.Map.empty ~f:(fun m v ->
-      let inf = Int.max_value / 4 in
-      let initial = if v = 0 then 0 else inf in
-      Map.set m ~key:v ~data:initial)
-  in
-  let in_queue =
-    Set.fold vars ~init:(Int.Table.create ()) ~f:(fun tbl v ->
-      Hashtbl.set tbl ~key:v ~data:false; tbl)
-  in
-  let relax =
-    Set.fold vars ~init:(Int.Table.create ()) ~f:(fun tbl v ->
-      Hashtbl.set tbl ~key:v ~data:0; tbl)
-  in
-  let q = Queue.create () in
-  Set.iter vars ~f:(fun v ->
-    Queue.enqueue q v;
-    Hashtbl.set in_queue ~key:v ~data:true
-  );
-  let rec loop dist =
-    if Queue.is_empty q then
-      let keys =
-        (* Remove sentinel node *)
-        Map.keys dist
-        |> List.filter ~f:(fun v -> v <> 0)
-      in
-      Solution.Sat (
-        Model.of_local dist ~lookup:Map.find ~keys
-      )
-    else begin
-      let u = Queue.dequeue_exn q in
-      Hashtbl.set in_queue ~key:u ~data:false;
-
-      let dist_u = Map.find_exn dist u in
-      let outgoing = Map.find edges u |> Option.value ~default:[] in
-
-      let process_edge (dist, found_cycle) (v, w) =
-        let dist_v = Map.find_exn dist v in
-        let candidate = dist_u + w in
-        if candidate < dist_v then begin
-          let dist = Map.set dist ~key:v ~data:candidate in
-          let cnt = (Hashtbl.find_exn relax v) + 1 in
-          if cnt > Set.length vars then
-            (dist, true)
-          else begin
-            Hashtbl.set relax ~key:v ~data:cnt;
-            if not (Hashtbl.find_exn in_queue v) then begin
-              Queue.enqueue q v;
-              Hashtbl.set in_queue ~key:v ~data:true
-              end;
-            (dist, false)
-            end
-          end else
-          (dist, found_cycle)
-      in
-
-      let (dist', cycle_found) =
-        List.fold outgoing ~init:(dist, false) ~f:process_edge
-      in
-
-      if cycle_found then Unsat
-      else loop dist'
-      end
+      Map.set m ~key:v ~data:0)
   in
 
-  loop dist
+  (* relax all constraints once *)
+  let relax_all dist =
+    List.fold atoms ~init:dist ~f:(fun dist {x; y; c} ->
+      let dx = Map.find_exn dist x in
+      let dy = Map.find_exn dist y in
+      let candidate = dy + c in
+      if candidate < dx then
+        Map.set dist ~key:x ~data:candidate
+      else
+        dist
+    )
+  in
+
+  (* run N - 1 relaxation passes *)
+  let dist =
+    let rec iter i dist =
+      if i = 0 then dist
+      else
+        let dist' = relax_all dist in
+        iter (i - 1) dist'
+    in
+    iter (n - 1) dist
+  in
+
+  let violating =
+    List.filter atoms ~f:(fun {x; y; c} ->
+      let dx = Map.find_exn dist x in
+      let dy = Map.find_exn dist y in
+      dy + c < dx
+    )
+  in
+
+  if not (List.is_empty violating) then begin
+    Solution.Unsat
+  end else
+    let keys =
+      Map.keys dist |> List.filter ~f:(fun v -> v <> 0)
+    in
+    Solution.Sat (
+      Model.of_local dist
+        ~lookup:(fun m k -> Option.map (Map.find m k) ~f:(fun v -> -v))
+        ~keys
+    )
 ;;
 
 let extend
