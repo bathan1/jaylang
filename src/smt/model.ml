@@ -76,7 +76,8 @@ let merge (left : 'k t) (right : 'k t) : 'k t =
   }
 
 
-(** Pretty-print SYMBOLS in MODEL. It formats each [symbol] [value] pair using the
+(** Pretty-print SYMBOL(key for each key in) MODEL. 
+    It formats each [symbol] [value] pair using the
     string returned by PP_ASSIGNMENT, separated by SEP (["\n"] by default).
 
     Otherwise, returns ["{}"].
@@ -100,9 +101,6 @@ let merge (left : 'k t) (right : 'k t) : 'k t =
       )
       in
       printf "Model formatted: %s\n" str_repr;
-      (*
-        
-      *)
     ;;
     ]}
 
@@ -115,15 +113,16 @@ let to_string
     (type a k)
     ?(sep = "\n")
     (model : k t)
-    (symbols : (a, k) Symbol.t list)
+    ~(symbol : int -> (a, k) Symbol.t)
     ~(pp_assignment : (a, k) Symbol.t -> a -> string)
   : string
 =
-    symbols
-    |> List.filter_map ~f:(fun sym ->
-         match model.value sym with
-         | Some v -> Some (pp_assignment sym v)
-         | None -> None)
+  model.keys
+    |> List.filter_map ~f:(fun sym_id ->
+      let key_symbol = symbol sym_id in
+      match model.value key_symbol with
+      | Some v -> Some (pp_assignment key_symbol v)
+      | None -> None)
     |> function
       | [] -> "{}"
       | assignments ->

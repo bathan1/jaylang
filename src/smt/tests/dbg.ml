@@ -85,7 +85,7 @@ let () =
   match solution with
   | Solution.Sat model ->
     Printf.printf "%s\n" (
-      Model.to_string model [x1; x2; x3; x4;]
+      Model.to_string model ~symbol:(fun key -> key |> Char.chr |> AsciiSymbol.make_int)
       ~pp_assignment:(fun (I x) v -> Printf.sprintf "%c => %d" (Char.chr x) v)
     )
   | _ ->

@@ -33,7 +33,7 @@ let vars_of_model (model : 'k Model.t) =
   )
 
 let model_to_string model =
-  Model.to_string model (vars_of_model model)
+  Model.to_string model ~symbol:AsciiSymbol.make_int
     ~pp_assignment:(fun (I uid) v ->
       Printf.sprintf "%c => %d"
         (Core.Char.of_int_exn uid)
