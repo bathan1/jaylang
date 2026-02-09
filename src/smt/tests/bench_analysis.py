@@ -6,7 +6,7 @@ from pathlib import Path
 
 # ---------- Config ----------
 if len(sys.argv) != 2:
-    print("usage: plot.py <bench.csv>", file=sys.stderr)
+    print("usage: python3 bench_analysis.py <bench.csv>", file=sys.stderr)
     sys.exit(1)
 
 CSV_FILE = sys.argv[1]

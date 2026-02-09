@@ -33,7 +33,7 @@ let vars_of_model (model : 'k Model.t) =
   )
 
 let model_to_string model =
-  Model.to_string model ~symbol:AsciiSymbol.make_int
+  Model.to_string model ~symbol:(fun uid -> uid |> Char.of_int_exn |> AsciiSymbol.make_int)
     ~pp_assignment:(fun (I uid) v ->
       Printf.sprintf "%c => %d"
         (Core.Char.of_int_exn uid)
@@ -85,14 +85,14 @@ let solve_with_time ~name solve expr =
   let time = Time_ns.(diff (now ()) start) in
   { name; time; result }
 
-let print_result solver vars r =
+let print_result solver r =
   let time_str = Time_ns.Span.to_string_hum r.time in
   printf "%s:\n" solver;
 
   (match r.result with
    | Solution.Sat model ->
        printf "  SAT\n";
-       Model.to_string model vars
+       Model.to_string model ~symbol:(fun uid -> uid |> Char.of_int_exn |> AsciiSymbol.make_int)
          ~pp_assignment:(fun (I uid) v ->
            sprintf "    %c => %d" (Char.of_int_exn uid) v
          )
@@ -184,7 +184,7 @@ let () =
         let model_text =
           match hybrid.result with
           | Solution.Sat model ->
-              Model.to_string model vars
+              Model.to_string model ~symbol:(fun uid -> uid |> Char.of_int_exn |> AsciiSymbol.make_int)
                 ~pp_assignment:(fun (I uid) v ->
                   Printf.sprintf "%c => %d"
                     (Char.of_int_exn uid) v
