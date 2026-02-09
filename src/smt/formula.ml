@@ -499,7 +499,6 @@ module Make_solver (X : SOLVABLE) = struct
                 Stop Solution.Unsat
 
               | Sat model ->
-                printf "diff model solved %d keys\n" (List.length model.keys);
                 let remaining_keys =
                   List.filter remaining_keys ~f:(fun k ->
                     not (List.mem model.keys k ~equal:Int.equal))
