@@ -40,12 +40,47 @@ let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src 
       | Some min_distance -> Some min_distance
     )
   in
-  Array.fold edges ~init:(distance, predecessor) ~f:(fun (distance, predecessor) (u, v, w) -> (
-    if distance.(u) + w < distance.(v) then
+(* Detect negative cycle and print it *)
+let cycle_start =
+  Array.fold edges ~init:None ~f:(fun acc (u, v, w) ->
+    match acc with
+    | Some _ -> acc
+    | None ->
+        match (predecessor.(v), predecessor.(u)) with
+        | _, _ ->
+            if distance.(u) + w < distance.(v) then
+              Some v
+            else
+              None
+  )
+  in
+  match cycle_start with
+  | None -> (distance, predecessor)
+  | Some v ->
+      (* Step 1: move n times to guarantee we're inside cycle *)
+      let rec move_back x i =
+        if i = 0 then x
+        else move_back (Option.value_exn predecessor.(x)) (i - 1)
+      in
+      let cycle_vertex = move_back v n in
+
+      (* Step 2: collect cycle *)
+      let rec collect_cycle curr acc =
+        if List.mem acc curr ~equal:Int.equal then
+          curr :: acc
+        else
+          collect_cycle
+            (Option.value_exn predecessor.(curr))
+            (curr :: acc)
+      in
+
+      let cycle = collect_cycle cycle_vertex [] in
+
+      printf "Negative cycle detected:\n";
+      List.iter cycle ~f:(fun x -> printf "%d -> " x);
+      printf "%d\n" cycle_vertex;
+
       raise (Invalid_argument "Negative cycle detected")
-    else
-      distance, predecessor
-  ))
 
 
 let n = 5
