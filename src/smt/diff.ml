@@ -248,10 +248,15 @@ let normalize atoms =
         c = a.c })
   in
   let n = Map.length mapping in
-  let vertices = Array.init n ~f:(fun i -> i) in
+  let vertices = Array.init (n + 1) ~f:(fun i -> i) in
   let edges = (
     atoms'
     |> List.map ~f:(fun {x; y; c;} -> (x, y, c))
+    |> fun edges -> (
+      let super_edges = List.init n ~f:(fun i ->
+        (0, i + 1, 0)
+      ) in List.concat [super_edges; edges]
+    )
     |> List.to_array
   )
   in
@@ -277,8 +282,29 @@ let normalize atoms =
           printf "UNSAT\n"
     ]}
 *)
-let check (_formula : atom list) : 'k Solution.t =
-  Solution.Sat Model.empty
+let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
+  formula
+  |> extract
+  |> normalize
+  |> fun (vertices, edges, key_to_index) -> (
+    let distances, _ = bellman_ford vertices edges ~src:0 
+    in
+    let distances_unwrapped = Array.map distances ~f:(fun dist -> Option.value_exn dist) in
+    let keys = Map.keys key_to_index in
+    Solution.Sat (
+      Model.of_local 
+        distances_unwrapped 
+        ~keys
+        ~lookup:(
+          fun dist symbol_key ->
+            let index = Map.find key_to_index symbol_key in
+            match index with
+            | None -> None
+            | Some i -> 
+              Some (-dist.(i))
+      )
+    )
+  )
 ;;
 
 let extend
@@ -286,11 +312,7 @@ let extend
   (solution_state : 'k Model.t)
   : 'k Model.t
 =
-  let atoms : atom list =
-    extract formula
-  in
-
-  match check atoms with
+  match check formula with
   | Solution.Unsat
   | Solution.Unknown ->
       failwith "Diff.extend: check returned Unsat/Unknown (invariant violated)"

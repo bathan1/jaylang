@@ -79,33 +79,37 @@ let formula = Formula.And [
   );
 ]
 
-module Solver = Smt.Formula.Make_solver (Overlays.Typed_z3)
+module Solver = Smt.Formula.Make_solver (struct
+  include Overlays.Typed_z3
+  let splits = [Splits.neq]
+  let logics : (module Formula.LOGIC) list = [(module Diff)]
+end)
 let () =
-  let atoms = Diff.extract formula in
-  let vertices, edges, map = Diff.normalize atoms in
-  let distances, _ = Diff.bellman_ford vertices edges ~src:0
-  in
-  let open Core in
-  Printf.printf "Atoms:\n";
-  Core.List.iter atoms ~f:(fun {Diff.x; y; c} ->
-    Printf.printf "{ x = %d, y = %d, c = %d }\n" x y c
-  );
-  Printf.printf "Normal:\n";
-  Core.Array.iter edges ~f:(fun (x, y, c) ->
-    Printf.printf "x%d <= x%d%s\n" x y (if c < 0 then " - " ^ (Int.to_string (-c)) else " + " ^ (Int.to_string c))
-  );
-  let distance_ls = List.of_array distances in
-  printf "Distances: %s\n" (List.to_string distance_ls ~f:(function
-    | None -> "disconnected"
-    | Some v -> Int.to_string v
-  ));
+  (* let atoms = Diff.extract formula in *)
+  (* let vertices, edges, map = Diff.normalize atoms in *)
+  (* let distances, _ = Diff.bellman_ford vertices edges ~src:0 *)
+  (* in *)
+  (* let open Core in *)
+  (* Printf.printf "Atoms:\n"; *)
+  (* Core.List.iter atoms ~f:(fun {Diff.x; y; c} -> *)
+  (*   Printf.printf "{ x = %d, y = %d, c = %d }\n" x y c *)
+  (* ); *)
+  (* Printf.printf "Normal:\n"; *)
+  (* Core.Array.iter edges ~f:(fun (x, y, c) -> *)
+  (*   Printf.printf "x%d <= x%d%s\n" x y (if c < 0 then " - " ^ (Int.to_string (-c)) else " + " ^ (Int.to_string c)) *)
+  (* ); *)
+  (* let distance_ls = List.of_array distances in *)
+  (* printf "Distances: %s\n" (List.to_string distance_ls ~f:(function *)
+  (*   | None -> "disconnected" *)
+  (*   | Some v -> Int.to_string v *)
+  (* )); *)
 
-  (* let solution = Solver.solve [formula] in *)
-  (* match solution with *)
-  (* | Solution.Sat model -> *)
-  (*   Printf.printf "%s\n" ( *)
-  (*     Model.to_string model ~symbol:(fun key -> key |> Char.chr |> AsciiSymbol.make_int) *)
-  (*     ~pp_assignment:(fun (I x) v -> Printf.sprintf "%c => %d" (Char.chr x) v) *)
-  (*   ) *)
-  (* | _ -> *)
-  (*   Printf.printf "UNSAT or UNKNOWN\n" *)
+  let solution = Solver.solve [formula] in
+  match solution with
+  | Solution.Sat model ->
+    Printf.printf "%s\n" (
+      Model.to_string model ~symbol:(fun key -> key |> Char.chr |> AsciiSymbol.make_int)
+      ~pp_assignment:(fun (I x) v -> Printf.sprintf "%c => %d" (Char.chr x) v)
+    )
+  | _ ->
+    Printf.printf "UNSAT or UNKNOWN\n"
