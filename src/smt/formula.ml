@@ -99,7 +99,7 @@ module type LOGIC = sig
   (** Returns a LOCAL solution. Used in the {!solve} loop to recursively check
       if the current Solution state is OK or not; it's NOT used to assign values.
       That's what {!extend} is for. *)
-  val check : atom list -> 'k Solution.t
+  val check : (bool, 'k) t -> 'k Solution.t
 
   (** Extend the solution to [(bool, 'k) t] FORMULA with its current solution state
       'k Model.t MODEL to spit out a new MODEL. *)
@@ -494,7 +494,7 @@ module Make_solver (X : SOLVABLE) = struct
             X.logics
             ~init:formula_keys
             ~f:(fun remaining_keys (module Logic) ->
-              match Logic.check (Logic.extract formula) with
+              match Logic.check formula with
               | Unsat ->
                 Stop Solution.Unsat
 

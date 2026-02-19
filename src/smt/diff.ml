@@ -32,34 +32,6 @@ type atom = {
   c : int;
 };;
 
-let normalize atoms =
-  let vars =
-    atoms
-    |> List.concat_map ~f:(fun a -> [a.x; a.y])
-    |> List.filter ~f:(fun v -> v <> 0)
-    |> List.dedup_and_sort ~compare:Int.compare
-  in
-
-  let mapping =
-    vars
-    |> List.mapi ~f:(fun i v -> (v, i + 1))
-    |> Int.Map.of_alist_exn
-  in
-
-  let map_var v =
-    if v = 0 then 0
-    else Map.find_exn mapping v
-  in
-
-  let atoms' =
-    List.map atoms ~f:(fun a ->
-      { x = map_var a.x;
-        y = map_var a.y;
-        c = a.c })
-  in
-
-  atoms', mapping
-
 
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
@@ -166,6 +138,125 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
     []
 ;;
 
+let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src : int) =
+  let n = Array.length vertices in
+  let distance, predecessor = Array.foldi
+    vertices 
+    ~init:(
+      Array.init n ~f:(fun i -> if i = src then Some 0 else None),
+      Array.init n ~f:(fun _ : int option -> None)
+    )
+    ~f:(fun i (distance, predecessor) _ -> 
+      if i = n - 1 then (distance, predecessor)
+      else begin
+      let next_distance, next_predecessor = Array.fold 
+        edges
+        ~init:(distance, predecessor)
+        ~f:(fun (distance, predecessor) (u, v, w) -> (
+          match (distance.(u), distance.(v)) with
+          | None, _ -> (distance, predecessor)
+          | Some min_dist_to_u, None -> (* initial case *) begin
+              distance.(v) <- Some (min_dist_to_u + w);
+              predecessor.(v) <- Some min_dist_to_u;
+              distance, predecessor
+            end
+          | Some min_dist_to_u, Some min_dist_to_v -> begin
+            if min_dist_to_u + w < min_dist_to_v then
+              distance.(v) <- Some (min_dist_to_u + w);
+              predecessor.(v) <- Some u;
+            distance, predecessor
+            end
+        ))
+      in
+      next_distance, next_predecessor
+    end)
+  in
+  (* detect negative cycle and print it *)
+  let cycle_start =
+    Array.fold edges ~init:None ~f:(fun acc (u, v, w) ->
+      match acc with
+      | Some _ -> acc
+      | None ->
+          match (predecessor.(v), predecessor.(u)) with
+          | _, _ ->
+            begin 
+              match distance.(u), distance.(v) with 
+              | None, _ (* then either u or v is not connected to the graph *)
+              | _, None -> None
+              | Some du, Some dv ->
+                if du + w < dv then
+                  Some v
+                else
+                  None
+            end
+    )
+  in
+  match cycle_start with
+  | None -> (distance, predecessor)
+  | Some v ->
+      let rec move_back x i =
+        if i = 0 then x
+        else match predecessor.(x) with
+          | None -> x
+          | Some parent -> move_back parent (i - 1)
+      in
+      let cycle_vertex = move_back v n in
+
+      let rec collect_cycle curr acc =
+        if List.mem acc curr ~equal:Int.equal then
+          curr :: acc
+        else
+          match predecessor.(curr) with
+          | None -> (curr :: acc)
+          | Some parent -> collect_cycle parent (curr :: acc)
+      in
+
+      let cycle = collect_cycle cycle_vertex [] in
+
+      printf "Negative cycle detected:\n";
+      List.iter cycle ~f:(fun x -> printf "%d -> " x);
+      printf "%d\n" cycle_vertex;
+
+      raise (Invalid_argument "Negative cycle detected")
+
+let normalize atoms =
+  List.iter atoms ~f:(fun {x; y; c} -> (
+    printf "{ x = %d; y = %d; c = %d }\n" x y c
+  ));
+  let vars =
+    atoms
+    |> List.concat_map ~f:(fun a -> [a.x; a.y])
+    |> List.filter ~f:(fun v -> v <> 0)
+    |> List.dedup_and_sort ~compare:Int.compare
+  in
+
+  let mapping =
+    vars
+    |> List.mapi ~f:(fun i v -> (v, i + 1))
+    |> Int.Map.of_alist_exn
+  in
+
+  let map_var v =
+    if v = 0 then 0
+    else Map.find_exn mapping v
+  in
+
+  let atoms' =
+    List.map atoms ~f:(fun a ->
+      { x = map_var a.x;
+        y = map_var a.y;
+        c = a.c })
+  in
+  let n = Map.length mapping in
+  let vertices = Array.init n ~f:(fun i -> i) in
+  let edges = (
+    atoms'
+    |> List.map ~f:(fun {x; y; c;} -> (x, y, c))
+    |> List.to_array
+  )
+  in
+  vertices, edges, mapping
+
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
     This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases).
 
@@ -186,66 +277,8 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
           printf "UNSAT\n"
     ]}
 *)
-let check (atoms : atom list) : 'k Solution.t =
-  (* collect variables *)
-  let vars =
-    List.fold atoms ~init:Int.Set.empty ~f:(fun acc {x; y; _} ->
-      Set.add (Set.add acc x) y)
-  in
-
-  let vars = Set.add vars 0 in  (* sentinel node *)
-
-  let n = Set.length vars in
-
-  (* initialize all distances to 0 *)
-  let dist =
-    Set.fold vars ~init:Int.Map.empty ~f:(fun m v ->
-      Map.set m ~key:v ~data:0)
-  in
-
-  (* relax all constraints once *)
-  let relax_all dist =
-    List.fold atoms ~init:dist ~f:(fun dist {x; y; c} ->
-      let dx = Map.find_exn dist x in
-      let dy = Map.find_exn dist y in
-      let candidate = dy + c in
-      if candidate < dx then
-        Map.set dist ~key:x ~data:candidate
-      else
-        dist
-    )
-  in
-
-  (* run N - 1 relaxation passes *)
-  let dist =
-    let rec iter i dist =
-      if i = 0 then dist
-      else
-        let dist' = relax_all dist in
-        iter (i - 1) dist'
-    in
-    iter (n - 1) dist
-  in
-
-  let violating =
-    List.filter atoms ~f:(fun {x; y; c} ->
-      let dx = Map.find_exn dist x in
-      let dy = Map.find_exn dist y in
-      dy + c < dx
-    )
-  in
-
-  if not (List.is_empty violating) then begin
-    Solution.Unsat
-  end else
-    let keys =
-      Map.keys dist |> List.filter ~f:(fun v -> v <> 0)
-    in
-    Solution.Sat (
-      Model.of_local dist
-        ~lookup:(fun m k -> Option.map (Map.find m k) ~f:(fun v -> -v))
-        ~keys
-    )
+let check (_formula : atom list) : 'k Solution.t =
+  Solution.Sat Model.empty
 ;;
 
 let extend
