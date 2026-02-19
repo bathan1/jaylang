@@ -32,6 +32,35 @@ type atom = {
   c : int;
 };;
 
+let normalize atoms =
+  let vars =
+    atoms
+    |> List.concat_map ~f:(fun a -> [a.x; a.y])
+    |> List.filter ~f:(fun v -> v <> 0)
+    |> List.dedup_and_sort ~compare:Int.compare
+  in
+
+  let mapping =
+    vars
+    |> List.mapi ~f:(fun i v -> (v, i + 1))
+    |> Int.Map.of_alist_exn
+  in
+
+  let map_var v =
+    if v = 0 then 0
+    else Map.find_exn mapping v
+  in
+
+  let atoms' =
+    List.map atoms ~f:(fun a ->
+      { x = map_var a.x;
+        y = map_var a.y;
+        c = a.c })
+  in
+
+  atoms', mapping
+
+
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
 
@@ -256,3 +285,4 @@ let extend
                   key :: acc.keys
               }
         )
+

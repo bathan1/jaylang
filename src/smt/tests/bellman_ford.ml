@@ -33,45 +33,44 @@ let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src 
       next_distance, next_predecessor
     end)
   in
-  (* if the graph is fully connected, then this doesn't remove any elements... *)
-  let distance = 
-    Array.filter_map distance ~f:(function
-      | None -> None
-      | Some min_distance -> Some min_distance
+  (* detect negative cycle and print it *)
+  let cycle_start =
+    Array.fold edges ~init:None ~f:(fun acc (u, v, w) ->
+      match acc with
+      | Some _ -> acc
+      | None ->
+          match (predecessor.(v), predecessor.(u)) with
+          | _, _ ->
+            begin 
+              match distance.(u), distance.(v) with 
+              | None, _ (* then either u or v is not connected to the graph *)
+              | _, None -> None
+              | Some du, Some dv ->
+                if du + w < dv then
+                  Some v
+                else
+                  None
+            end
     )
-  in
-(* Detect negative cycle and print it *)
-let cycle_start =
-  Array.fold edges ~init:None ~f:(fun acc (u, v, w) ->
-    match acc with
-    | Some _ -> acc
-    | None ->
-        match (predecessor.(v), predecessor.(u)) with
-        | _, _ ->
-            if distance.(u) + w < distance.(v) then
-              Some v
-            else
-              None
-  )
   in
   match cycle_start with
   | None -> (distance, predecessor)
   | Some v ->
-      (* Step 1: move n times to guarantee we're inside cycle *)
       let rec move_back x i =
         if i = 0 then x
-        else move_back (Option.value_exn predecessor.(x)) (i - 1)
+        else match predecessor.(x) with
+          | None -> x
+          | Some parent -> move_back parent (i - 1)
       in
       let cycle_vertex = move_back v n in
 
-      (* Step 2: collect cycle *)
       let rec collect_cycle curr acc =
         if List.mem acc curr ~equal:Int.equal then
           curr :: acc
         else
-          collect_cycle
-            (Option.value_exn predecessor.(curr))
-            (curr :: acc)
+          match predecessor.(curr) with
+          | None -> (curr :: acc)
+          | Some parent -> collect_cycle parent (curr :: acc)
       in
 
       let cycle = collect_cycle cycle_vertex [] in
@@ -83,18 +82,23 @@ let cycle_start =
       raise (Invalid_argument "Negative cycle detected")
 
 
-let n = 5
+let n = 7
 let vertices = Array.init n ~f:(fun i -> i)
 let edges = [|
-  (0, 2, -6);
-  (0, 3, -3);
-  (1, 0, 3);
-  (2, 1, 2);
-  (2, 3, -1);
-  (2, 1, 5);
+  (1, 3, -5); (* x1 <= x3 - 5 *)
+  (1, 4, -3); (* x1 <= x4 - 3 *)
+  (2, 1, 3); (* x2 <= x1 + 3 *)
+  (3, 2, 2); (* x3 <= x2 + 2 *)
+  (3, 4, -1); (* x3 <= x4 - 1 *)
+  (4, 2, 5); (* x4 <= x2 + 5 *)
+
+  (5, 6, 100); (* x5 <= x6 + 100 *)
 |]
 
 let () =
   let distance, _ = bellman_ford vertices edges ~src:0 in
   let distance_ls = List.of_array distance in
-  printf "Distances: %s\n" (List.to_string distance_ls ~f:Int.to_string);
+  printf "Distances: %s\n" (List.to_string distance_ls ~f:(function
+    | None -> "disconnected"
+    | Some v -> Int.to_string v
+  ));
