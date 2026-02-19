@@ -192,7 +192,7 @@ let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src 
     )
   in
   match cycle_start with
-  | None -> (distance, predecessor)
+  | None -> `No_negative_cycle (distance, predecessor)
   | Some v ->
       let rec move_back x i =
         if i = 0 then x
@@ -212,17 +212,15 @@ let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src 
       in
 
       let cycle = collect_cycle cycle_vertex [] in
+      `Negative_cycle cycle
 
-      printf "Negative cycle detected:\n";
-      List.iter cycle ~f:(fun x -> printf "%d -> " x);
-      printf "%d\n" cycle_vertex;
-
-      raise (Invalid_argument "Negative cycle detected")
+      (* printf "Negative cycle detected:\n"; *)
+      (* List.iter cycle ~f:(fun x -> printf "%d -> " x); *)
+      (* printf "%d\n" cycle_vertex; *)
+      (**)
+      (* raise (Invalid_argument "Negative cycle detected") *)
 
 let normalize atoms =
-  List.iter atoms ~f:(fun {x; y; c} -> (
-    printf "{ x = %d; y = %d; c = %d }\n" x y c
-  ));
   let vars =
     atoms
     |> List.concat_map ~f:(fun a -> [a.x; a.y])
@@ -287,23 +285,24 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
   |> extract
   |> normalize
   |> fun (vertices, edges, key_to_index) -> (
-    let distances, _ = bellman_ford vertices edges ~src:0 
-    in
-    let distances_unwrapped = Array.map distances ~f:(fun dist -> Option.value_exn dist) in
-    let keys = Map.keys key_to_index in
-    Solution.Sat (
-      Model.of_local 
-        distances_unwrapped 
-        ~keys
-        ~lookup:(
-          fun dist symbol_key ->
-            let index = Map.find key_to_index symbol_key in
-            match index with
-            | None -> None
-            | Some i -> 
-              Some (-dist.(i))
+    match bellman_ford vertices edges ~src:0 with
+    | `No_negative_cycle (distances, _) -> 
+      let distances_unwrapped = Array.map distances ~f:(fun dist -> Option.value_exn dist) in
+      let keys = Map.keys key_to_index in
+      Solution.Sat (
+        Model.of_local 
+          distances_unwrapped 
+          ~keys
+          ~lookup:(
+            fun dist symbol_key ->
+              let index = Map.find key_to_index symbol_key in
+              match index with
+              | None -> None
+              | Some i -> 
+                Some (-dist.(i))
+        )
       )
-    )
+    | `Negative_cycle _cycle -> Solution.Unsat
   )
 ;;
 

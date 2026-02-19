@@ -442,6 +442,51 @@ let extract_all_keys : type a k. (a, k) t -> int list =
     | Binop (_, lhs, rhs) -> go lhs @ go rhs
   in
   go
+;;
+
+let rec substitute :
+  type a k.
+  (a, k) t -> k Model.t -> (a, k) t =
+  fun formula model ->
+    match formula with
+    | Const_bool _
+    | Const_int _ ->
+        formula
+
+    | Key sym ->
+      begin match sym with
+      | I _ ->
+          begin match model.value sym with
+          | Some value -> Const_int value
+          | None -> formula
+          end
+      | B _ ->
+          formula
+    end
+
+    | Binop (op, l, r) ->
+        begin match op with
+        | Plus | Minus | Times | Divide | Modulus | Not_equal | Or ->
+            Binop (op,
+                   substitute l model,
+                   substitute r model)
+
+        | Less_than
+        | Less_than_eq
+        | Greater_than
+        | Greater_than_eq
+        | Equal ->
+            Binop (op,
+                   substitute l model,
+                   substitute r model)
+        end
+
+    | Not f ->
+        Not (substitute f model)
+
+    | And fs ->
+        And (List.map fs ~f:(fun f -> substitute f model))
+
 
 (* let append_line filename line = *)
 (*   Out_channel.with_file ~append:true filename ~f:(fun oc -> *)

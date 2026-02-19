@@ -77,8 +77,6 @@ let print_csv_row
     is_winner
     diff
 
-
-
 let solve_with_time ~name solve expr =
   let start = Time_ns.now () in
   let result = solve [expr] in
