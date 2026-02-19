@@ -108,9 +108,11 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   (* x > y -> (y - x) <= -1 (difference is at least 1) *)
   | Binop (Greater_than, Key I x, Key I y)
   | Binop (Less_than,    Key I y, Key I x)
-  | Not Binop (Greater_than_eq, Key I x, Key I y)
   | Not Binop (Less_than_eq,    Key I y, Key I x) ->
       [{ x = y; y = x; c = -1 }]
+
+  | Not Binop (Greater_than_eq, Key I x, Key I y) ->
+    [{ x = x; y = y; c = -1 }]
 
   (* x + c <= y  ->  x - y <= -c *)
   | Binop (Less_than_eq, Binop (Plus, Key I x, Const_int c), Key I y)
