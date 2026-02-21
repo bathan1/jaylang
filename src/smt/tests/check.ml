@@ -82,7 +82,7 @@ let formula = Formula.And [
 module Solver = Smt.Formula.Make_solver (struct
   include Overlays.Typed_z3
   let splits = [Splits.neq]
-  let logics : (module Formula.LOGIC) list = [(module Diff)]
+  let logics : (module Formula.LOGIC) list = [(module Difference)]
 end)
 
 module Checker = Smt.Formula.Make_solver (Overlays.Typed_z3)

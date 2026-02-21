@@ -13,7 +13,7 @@ let x4 = AsciiSymbol.make_int 'd'
 module Solver = Smt.Formula.Make_solver (struct
   include Overlays.Typed_z3
   let splits = [Splits.neq]
-  let logics : (module Formula.LOGIC) list = [(module Diff)]
+  let logics : (module Formula.LOGIC) list = [(module Difference)]
 end)
 
 let model_to_string model =
@@ -26,21 +26,10 @@ let model_to_string model =
 
 open Core
 let () =
-  (* (not ((a + 1) >= 0)) ^ (a <= 0) *)
   let formula = Formula.And [
-    Not (
-      Binop (
-        Greater_than_eq,
-        (Binop (Plus, Key a, Const_int 1)),
-        Const_int 0
-      )
-    )
+    Formula.Binop (Less_than, Key a, Const_int 0);
   ]
   in
-  let extracted = Diff.extract formula in
-  List.iter extracted ~f:(fun {x; y; c;} -> (
-    printf "%c <= %c%s\n" (Char.of_int_exn x) (Char.of_int_exn y) (if c < 0 then " - " ^ Int.to_string (-c) else " + " ^ Int.to_string c)
-  ));
   let result = Solver.solve [formula] in
   match result with
   | Solution.Sat model -> printf "%s\n" (model_to_string model)

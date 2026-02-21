@@ -3,6 +3,10 @@
    can be simplified / solved using Integer Difference Logic. *)
 open Core
 
+type var =
+  | Symbol_key of int
+  | Z0
+
 (** Encodes the relation [X - Y <= C], or equivalently, [X <= Y + C].
     The IDL logic itself supports {i any} of the following binary operators:
     {ol
@@ -23,15 +27,14 @@ open Core
 *)
 type atom = {
   (** Variable (id) to subtract. *)
-  x : int;
+  x : var;
 
   (** Variable (id) that subtracts [x]. *)
-  y : int;
+  y : var;
 
   (** Intepreted as an int {i literal} *)
   c : int;
 };;
-
 
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
@@ -57,13 +60,13 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
     (* x = c -> (x - 0 <= c) and (0 - y) <= -c *)
   | Binop (Equal, Key I x, Const_int c)
   | Binop (Equal, Const_int c, Key I x) ->
-    [ { x; y = 0; c; };
-      {x = 0; y = x; c = -c } ]
+    [ { x = Symbol_key x; y = Z0; c; };
+      {x = Z0; y = Symbol_key x; c = -c } ]
 
     (* x = y -> (x - y) <= 0 and (y - x) <= 0*)
   | Binop (Equal, Key I x, Key I y) ->
-    [ { x; y; c = 0 };
-      { x = y; y = x; c = 0 } ]
+    [ { x = Symbol_key x; y = Symbol_key y; c = 0 };
+      { x = Symbol_key y; y = Symbol_key x; c = 0 } ]
 
     (* x <= y -> (x - y <= 0)
         y >= x -> (x - y <= 0)
@@ -72,7 +75,7 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Binop (Greater_than_eq, Key I y, Key I x)
   | Not Binop (Less_than, Key I y, Key I x)
   | Not Binop (Greater_than, Key I x, Key I y) ->
-    [{ x; y; c = 0 }]
+    [{ x = Symbol_key x; y = Symbol_key y; c = 0 }]
 
     (* x <= c -> (x - 0) <= c
         c >= x -> (x - 0) <= c
@@ -81,14 +84,14 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Binop (Greater_than_eq, Const_int c, Key I x)
   | Not Binop (Less_than, Const_int c, Key I x)
   | Not Binop (Greater_than, Key I x, Const_int c) ->
-    [{ x; y = 0; c }]
+    [{ x = Symbol_key x; y = Z0; c }]
 
     (* x < c -> x - 0 <= c - 1 *)
   | Binop (Less_than, Key I x, Const_int c)
   | Binop (Greater_than, Const_int c, Key I x)
   | Not Binop (Less_than_eq, Const_int c, Key I x)
   | Not Binop (Greater_than_eq, Key I x, Const_int c) ->
-    [{ x; y = 0; c = c - 1 }]
+    [{ x = Symbol_key x; y = Z0; c = c - 1 }]
 
     (* x >= c -> 0 - x <= -c
        not (x < c) -> x >= c -> (0 - x) <= -c *)
@@ -96,41 +99,41 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Binop (Less_than_eq, Const_int c, Key I x)
   | Not Binop (Greater_than, Const_int c, Key I x)
   | Not Binop (Less_than, Key I x, Const_int c) ->
-    [ {x = 0; y = x; c = -c}  ]
+    [ {x = Z0; y = Symbol_key x; c = -c}  ]
 
   (* x > c -> (0 - x) <= -(c + 1) *)
   | Binop (Greater_than, Key I x, Const_int c)
   | Binop (Less_than, Const_int c, Key I x)
   | Not Binop (Greater_than_eq, Const_int c, Key I x)
   | Not Binop (Less_than_eq, Key I x, Const_int c) ->
-    [{ x = 0; y = x; c = -(c + 1) }]
+    [{ x = Z0; y = Symbol_key x; c = -(c + 1) }]
 
   (* x > y -> (y - x) <= -1 (difference is at least 1) *)
   | Binop (Greater_than, Key I x, Key I y)
   | Binop (Less_than,    Key I y, Key I x)
   | Not Binop (Less_than_eq,    Key I y, Key I x) ->
-      [{ x = y; y = x; c = -1 }]
+      [{ x = Symbol_key y; y = Symbol_key x; c = -1 }]
 
   | Not Binop (Greater_than_eq, Key I x, Key I y) ->
-    [{ x = x; y = y; c = -1 }]
+    [{ x = Symbol_key x; y = Symbol_key y; c = -1 }]
 
   (* x + c <= y  ->  x - y <= -c *)
   | Binop (Less_than_eq, Binop (Plus, Key I x, Const_int c), Key I y)
   | Binop (Less_than_eq, Binop (Plus, Const_int c, Key I x), Key I y) ->
-      [{ x; y; c = -c }]
+      [{ x = Symbol_key x; y = Symbol_key y; c = -c }]
 
   (* y <= x + c  ->  y - x <= c *)
   | Binop (Less_than_eq, Key I y, Binop (Plus, Key I x, Const_int c))
   | Binop (Less_than_eq, Key I y, Binop (Plus, Const_int c, Key I x)) ->
-      [{ x = y; y = x; c }]
+      [{ x = Symbol_key y; y = Symbol_key x; c }]
 
   (* x - c <= y  ->  x - y <= c *)
   | Binop (Less_than_eq, Binop (Minus, Key I x, Const_int c), Key I y) ->
-      [{ x; y; c }]
+      [{ x = Symbol_key x; y = Symbol_key y; c }]
 
   (* y <= x - c  ->  y - x <= -c *)
   | Binop (Less_than_eq, Key I y, Binop (Minus, Key I x, Const_int c)) ->
-      [{ x = y; y = x; c = -c }]
+      [{ x = Symbol_key y; y = Symbol_key x; c = -c }]
 
   | And exprs ->
     exprs
@@ -222,48 +225,45 @@ let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src 
       (**)
       (* raise (Invalid_argument "Negative cycle detected") *)
 
-let normalize atoms =
+let normalize (atoms : atom list) =
   let vars =
     atoms
-    |> List.concat_map ~f:(fun a -> [a.x; a.y])
-    |> List.filter ~f:(fun v -> v <> 0)
+    |> List.concat_map ~f:(fun a -> 
+      match a.x, a.y with
+      | Symbol_key x, Symbol_key y -> [x; y]
+      | Symbol_key key, Z0 | Z0, Symbol_key key -> [key]
+      | _ -> []
+    )
     |> List.dedup_and_sort ~compare:Int.compare
   in
-
-  let mapping =
+  let key_to_index =
     vars
     |> List.mapi ~f:(fun i v -> (v, i + 1))
     |> Int.Map.of_alist_exn
   in
-
-  let map_var v =
-    if v = 0 then 0
-    else Map.find_exn mapping v
+  let n = 1 + Map.length key_to_index + 1
+  (* [0; x; y; z0] *)
   in
-
-  let atoms' =
-    List.map atoms ~f:(fun a ->
-      { x = map_var a.x;
-        y = map_var a.y;
-        c = a.c })
+  let get_index = Map.find_exn key_to_index in
+  let vertices = Array.init n ~f:(fun i -> i) in
+  let edges_constraints = List.filter_map atoms ~f:(fun {x; y; c;} -> (
+      match x, y with
+      | Symbol_key x, Symbol_key y -> Some (get_index x, get_index y, c)
+      | Symbol_key x, Z0 -> Some (get_index x, n - 1, c)
+      | Z0, Symbol_key y -> Some (n - 1, get_index y, c)
+      | _ -> None
+    ))
   in
-  let n = Map.length mapping in
-  let vertices = Array.init (n + 1) ~f:(fun i -> i) in
-  let edges = (
-    atoms'
-    |> List.map ~f:(fun {x; y; c;} -> (x, y, c))
-    |> fun edges -> (
-      let super_edges = List.init n ~f:(fun i ->
-        (0, i + 1, 0)
-      ) in List.concat [super_edges; edges]
-    )
-    |> List.to_array
-  )
+  let dummy_root_edges =
+    List.init n ~f:(fun i -> (0, i, 0))
   in
-  vertices, edges, mapping
+  vertices, Array.of_list (edges_constraints @ dummy_root_edges), key_to_index
 
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
     This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases).
+
+    x < 0
+
 
     {3 Example}
     {[
@@ -288,8 +288,11 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
   |> normalize
   |> fun (vertices, edges, key_to_index) -> (
     match bellman_ford vertices edges ~src:0 with
+    | `Negative_cycle _ -> Solution.Unsat
     | `No_negative_cycle (distances, _) -> 
-      let distances_unwrapped = Array.map distances ~f:(fun dist -> Option.value_exn dist) in
+      let distances_unwrapped = Array.filter_opt distances in
+      let n = Array.length vertices in
+      let offset = distances_unwrapped.(n - 1) in
       let keys = Map.keys key_to_index in
       Solution.Sat (
         Model.of_local 
@@ -301,10 +304,9 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
               match index with
               | None -> None
               | Some i -> 
-                Some (-dist.(i))
+                Some (-1 * (dist.(i) - offset))
         )
       )
-    | `Negative_cycle _cycle -> Solution.Unsat
   )
 ;;
 
