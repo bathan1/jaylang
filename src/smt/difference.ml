@@ -2,6 +2,8 @@
    since a large number of expressions ceval generates
    can be simplified / solved using Integer Difference Logic. *)
 open Core
+open Smt.Formula
+open Smt.Binop
 
 type var =
   | Symbol_key of int
@@ -34,7 +36,29 @@ type atom = {
 
   (** Intepreted as an int {i literal} *)
   c : int;
-};;
+}
+
+let is_int_compare = function
+  | Less_than
+  | Less_than_eq
+  | Greater_than
+  | Greater_than_eq
+  | Equal -> true
+  | _ -> false
+
+let rec rewrite : (bool, 'k) Formula.t -> (bool, 'k) Formula.t =
+  function
+  (* (x )*)
+  | Binop (op,
+           Binop (Minus, Key I x, Const_int c1),
+           Const_int c2)
+      when is_int_compare op ->
+    Binop (
+      op,
+      Key (I x),
+      Const_int (c2 + c1)
+    )
+  | f -> f
 
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
