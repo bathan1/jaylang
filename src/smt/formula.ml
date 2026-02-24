@@ -516,10 +516,8 @@ module Make_solver (X : SOLVABLE) = struct
 
       This is essentially a dumbed down version of the DPLL(T) algorithm.
   *)
-  let rec solve ?(tries_left = 100) (exprs : (bool, 'k) t list) : 'k Solution.t =
-    if tries_left <= 0 then
-      Solution.Unknown
-    else if List.is_empty X.logics then
+  let rec solve (exprs : (bool, 'k) t list) : 'k Solution.t =
+    if List.is_empty X.logics then
       X.solve [M.transform (and_ exprs)]
     else
       exprs

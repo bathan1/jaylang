@@ -2,8 +2,6 @@
    since a large number of expressions ceval generates
    can be simplified / solved using Integer Difference Logic. *)
 open Core
-open Smt.Formula
-open Smt.Binop
 
 type var =
   | Symbol_key of int
@@ -39,25 +37,83 @@ type atom = {
 }
 
 let is_int_compare = function
-  | Less_than
+  | Binop.Less_than
   | Less_than_eq
   | Greater_than
   | Greater_than_eq
   | Equal -> true
   | _ -> false
 
-let rec rewrite : (bool, 'k) Formula.t -> (bool, 'k) Formula.t =
+let flip_compare = function
+  | Binop.Less_than -> Binop.Greater_than_eq
+  | Less_than_eq -> Greater_than
+  | Greater_than -> Less_than_eq
+  | Greater_than_eq -> Less_than
+  | Equal -> failwith "Negation of equality not supported"
+  | op -> op
+
+let rec linearize : type k.
+  (int, k) Formula.t -> (int * int) option =
   function
-  (* (x )*)
-  | Binop (op,
-           Binop (Minus, Key I x, Const_int c1),
-           Const_int c2)
-      when is_int_compare op ->
-    Binop (
-      op,
-      Key (I x),
-      Const_int (c2 + c1)
-    )
+  | Key (I x) ->
+      Some (x, 0)
+
+  | Binop (Plus, t, Const_int c) ->
+      Option.map (linearize t) ~f:(fun (x, k) ->
+        (x, k + c)
+      )
+
+  | Binop (Plus, Const_int c, t) ->
+      Option.map (linearize t) ~f:(fun (x, k) ->
+        (x, k + c)
+      )
+
+  | Binop (Minus, t, Const_int c) ->
+      Option.map (linearize t) ~f:(fun (x, k) ->
+        (x, k - c)
+      )
+
+  | _ ->
+      None
+
+let rec rewrite_int : type k.
+  (int, k) Formula.t -> (int, k) Formula.t =
+function
+  | Binop (Plus, a, b) ->
+      Binop (Plus, rewrite_int a, rewrite_int b)
+
+  | Binop (Minus, a, b) ->
+      Binop (Minus, rewrite_int a, rewrite_int b)
+
+  | t ->
+      t
+
+let rec rewrite : type k.
+  (bool, k) Formula.t -> (bool, k) Formula.t =
+function
+  | Not (Binop (Less_than, a, b)) ->
+      rewrite (Binop (Greater_than_eq, a, b))
+  | Not (Binop (Less_than_eq, a, b)) ->
+      rewrite (Binop (Greater_than, a, b))
+  | Not (Binop (Greater_than, a, b)) ->
+      rewrite (Binop (Less_than_eq, a, b))
+  | Not (Binop (Greater_than_eq, a, b)) ->
+      rewrite (Binop (Less_than, a, b))
+  | Binop ((Less_than | Less_than_eq
+           | Greater_than | Greater_than_eq) as op,
+           lhs,
+           Const_int c2) ->
+      let lhs = rewrite_int lhs in
+      begin
+        match linearize lhs with
+        | Some (x, k') ->
+            Binop (op,
+                   Key (I x),
+                   Const_int (c2 - k'))
+        | None ->
+            Binop (op, lhs, Const_int c2)
+      end
+  | And xs -> And (List.map xs ~f:rewrite)
   | f -> f
 
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
@@ -308,6 +364,7 @@ let normalize (atoms : atom list) =
 *)
 let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
   formula
+  |> rewrite
   |> extract
   |> normalize
   |> fun (vertices, edges, key_to_index) -> (

@@ -26,10 +26,19 @@ let model_to_string model =
 
 open Core
 let () =
-  let formula = Formula.And [
-    Formula.Binop (Less_than, Key a, Const_int 0);
-  ]
+  (* (not ((a - 1) <= 0)) *)
+  let formula = Formula.Not (
+    Binop (
+      Binop.Less_than_eq,
+      (Binop (Binop.Minus, Key a, Const_int 1)),
+      Const_int 0
+    )
+  )
   in
+  let formula_rewritten = Difference.rewrite formula in
+  let before_rewrite = Formula.to_string formula in
+  let after_rewrite = Formula.to_string formula_rewritten in
+  printf "before: %s\nafter:%s\n" before_rewrite after_rewrite;
   let result = Solver.solve [formula] in
   match result with
   | Solution.Sat model -> printf "%s\n" (model_to_string model)
