@@ -36,22 +36,6 @@ type atom = {
   c : int;
 }
 
-let is_int_compare = function
-  | Binop.Less_than
-  | Less_than_eq
-  | Greater_than
-  | Greater_than_eq
-  | Equal -> true
-  | _ -> false
-
-let flip_compare = function
-  | Binop.Less_than -> Binop.Greater_than_eq
-  | Less_than_eq -> Greater_than
-  | Greater_than -> Less_than_eq
-  | Greater_than_eq -> Less_than
-  | Equal -> failwith "Negation of equality not supported"
-  | op -> op
-
 let rec linearize : type k.
   (int, k) Formula.t -> (int * int) option =
   function
@@ -91,6 +75,15 @@ function
 let rec rewrite : type k.
   (bool, k) Formula.t -> (bool, k) Formula.t =
 function
+  | Binop (Less_than_eq, Const_int c1, rhs) ->
+    rewrite (Binop (Greater_than_eq, rhs, Const_int c1))
+  | Binop (Less_than, Const_int c1, rhs) ->
+      rewrite (Binop (Greater_than, rhs, Const_int c1))
+  | Binop (Greater_than_eq, Const_int c1, rhs) ->
+      rewrite (Binop (Less_than_eq, rhs, Const_int c1))
+  | Binop (Greater_than, Const_int c1, rhs) ->
+      rewrite (Binop (Less_than, rhs, Const_int c1))
+
   | Not (Binop (Less_than, a, b)) ->
       rewrite (Binop (Greater_than_eq, a, b))
   | Not (Binop (Less_than_eq, a, b)) ->
@@ -339,6 +332,26 @@ let normalize (atoms : atom list) =
   in
   vertices, Array.of_list (edges_constraints @ dummy_root_edges), key_to_index
 
+let rec contains_mul_or_div : type s k.
+  (s, k) Formula.t -> bool =
+  function
+  | Binop (Modulus, _, _)
+  | Binop (Times, _, _)
+  | Binop (Divide, _, _) ->
+      true
+
+  | Binop (_, a, b) ->
+      contains_mul_or_div a || contains_mul_or_div b
+
+  | Not f ->
+      contains_mul_or_div f
+
+  | And xs ->
+      List.exists xs ~f:contains_mul_or_div
+
+  | _ ->
+      false
+
 (** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
     This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases).
 
@@ -363,32 +376,33 @@ let normalize (atoms : atom list) =
     ]}
 *)
 let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
-  formula
-  |> rewrite
-  |> extract
-  |> normalize
-  |> fun (vertices, edges, key_to_index) -> (
-    match bellman_ford vertices edges ~src:0 with
-    | `Negative_cycle _ -> Solution.Unsat
-    | `No_negative_cycle (distances, _) -> 
-      let distances_unwrapped = Array.filter_opt distances in
-      let n = Array.length vertices in
-      let offset = distances_unwrapped.(n - 1) in
-      let keys = Map.keys key_to_index in
-      Solution.Sat (
-        Model.of_local 
-          distances_unwrapped 
-          ~keys
-          ~lookup:(
-            fun dist symbol_key ->
-              let index = Map.find key_to_index symbol_key in
-              match index with
-              | None -> None
-              | Some i -> 
-                Some (-1 * (dist.(i) - offset))
-        )
-      )
-  )
+  if contains_mul_or_div formula then
+    Solution.Unknown
+  else
+    formula
+    |> rewrite
+    |> extract
+    |> normalize
+    |> fun (vertices, edges, key_to_index) ->
+      match bellman_ford vertices edges ~src:0 with
+      | `Negative_cycle _ ->
+          Solution.Unsat
+      | `No_negative_cycle (distances, _) ->
+          let distances_unwrapped = Array.filter_opt distances in
+          let n = Array.length vertices in
+          let offset = distances_unwrapped.(n - 1) in
+          let keys = Map.keys key_to_index in
+          Solution.Sat (
+            Model.of_local
+              distances_unwrapped
+              ~keys
+              ~lookup:(fun dist symbol_key ->
+                match Map.find key_to_index symbol_key with
+                | None -> None
+                | Some i ->
+                    Some (-1 * (dist.(i) - offset))
+              )
+          )
 ;;
 
 let extend
