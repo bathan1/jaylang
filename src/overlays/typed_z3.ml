@@ -89,7 +89,7 @@ module Make_of_context (C : CONTEXT) : Formula.SOLVABLE = struct
     >>| unbox_expr
 
   let splits = [(* Splits.neq *)]
-  let logics : (module Formula.LOGIC) list = [(* (module Diff) *)]
+  let logics : (module Formula.LOGIC) list = [(* (module Difference) *)]
 
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
     let e = and_ exprs in

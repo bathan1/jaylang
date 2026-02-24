@@ -304,12 +304,6 @@ let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src 
     let cycle = collect_cycle cycle_vertex [] in
     `Negative_cycle cycle
 
-(* printf "Negative cycle detected:\n"; *)
-(* List.iter cycle ~f:(fun x -> printf "%d -> " x); *)
-(* printf "%d\n" cycle_vertex; *)
-(**)
-(* raise (Invalid_argument "Negative cycle detected") *)
-
 let normalize (atoms : atom list) =
   let vars =
     atoms
