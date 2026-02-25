@@ -356,81 +356,18 @@ end
 
 type 'k solver = (bool, 'k) t list -> 'k Solution.t
 
-(** Pretty prints FORMULA, with optional KEY function.
 
-    Key function is passed the [uid] of the Key and is asked to
-    turn that into a meaningful string.
-
-    For example, if [uid]s were encoded as ASCII codes for keys 'a', 'b', 'c', 'd',
-    we could decode that to a [string]:
-    {3 Example}
-    {[
-      printf "(%d) Hybrid solve on: %s\n"
-        i
-        (
-          Formula.to_string expr ~key:(
-            fun uid -> (
-              uid
-              |> Char.of_int_exn
-              |> Char.to_string
-            )
-        ));
-    ]}
-    The log would look something like:
-    {[
-    Hybrid solve on: ((a = 123456) ^ (b = 123456) ^ (not (c = 123456)) ^ (d = 123456))
-    ]}
+(** Branch CONJUNCTION into equivalent left and right expressions
+    if that transformation is encoded by a function in SPLITS.
 *)
-(* let rec to_string : type a k. ?key:(int -> string) -> (a, k) t -> string = *)
-(*   fun *)
-(*     ?(key=fun uid -> ( *)
-(*     sprintf "<Key#%d>" uid *)
-(*   )) formula -> *)
-(*   match formula with *)
-(*   | Const_int i -> Int.to_string i *)
-(*   | Const_bool b -> Bool.to_string b *)
-(*   | Key (I uid) *)
-(*     | Key (B uid) -> key uid *)
-(*   | Not e -> *)
-(*     sprintf "(not %s)" (to_string e ~key) *)
-(*   | And es -> *)
-(*     let parts = List.map es ~f:(to_string ~key) in *)
-(*     sprintf "(%s)" (String.concat ~sep:" ^ " parts) *)
-(*   | Binop (op, e1, e2) -> *)
-(*     let op_str = *)
-(*       match op with *)
-(*       | Equal -> "=" *)
-(*       | Not_equal -> "!=" *)
-(*       | Less_than -> "<" *)
-(*       | Less_than_eq -> "<=" *)
-(*       | Greater_than -> ">" *)
-(*       | Greater_than_eq -> ">=" *)
-(*       | Plus -> "+" *)
-(*       | Minus -> "-" *)
-(*       | Times -> "*" *)
-(*       | Divide -> "/" *)
-(*       | Modulus -> "mod" *)
-(*       | Or -> "or" *)
-(*     in *)
-(*     sprintf "(%s %s %s)" (to_string e1 ~key) op_str (to_string e2 ~key) *)
-
-let as_conjunction = function
-  | And xs -> xs
-  | e -> [e]
-
-(** Maybe branch on an unresolved literal in [(bool, 'k) t] of CONJUNCTIONS 
-    ({!And}) based on the rules encoded in the [(module SPLIT) list] SPLITS, 
-    if such a branch exists.
-
-    If it does exist, then this returns a 3 tuple
-    RESULT where:
-      - [RESULT[0] = left split]
-      - [RESULT[1] = right split]
-      - [RESULT[2] = expression with the literal removed.]
-    And RESULT is just the very {b first} split function that returns [Some] result.
-*)
-let branch splits conjunction =
-  let exprs = as_conjunction conjunction in
+let branch 
+    (splits : 'k split_fn list)
+    (conjunction : (bool, 'k) t)
+    : ((bool, 'k) t list * (bool, 'k) t list) option =
+  let exprs = match conjunction with
+    | And xs -> xs
+    | e -> [e]
+  in
 
   let rec aux acc = function
     | [] -> None
