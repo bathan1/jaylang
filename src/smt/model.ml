@@ -207,17 +207,17 @@ let fold
 
     {["From local: { a => hello; b => world }"]}
 *)
-let of_local (local : 'a) ~(keys : int list) ~(lookup : 'a -> int -> 'b option): 'k t =
+let of_local (keys : int list) ~(lookup : int -> 'b option): 'k t =
   {
     value =
       (fun (type a) (sym : (a,'k) Symbol.t) ->
         match sym with
         | I x ->
-          Option.map (lookup local x) ~f:(fun v ->
+          Option.map (lookup x) ~f:(fun v ->
             (Obj.magic v : a)
           )
         | B x ->
-          Option.map (lookup local x) ~f:(fun v ->
+          Option.map (lookup x) ~f:(fun v ->
             (Obj.magic v : a)
           )
       );

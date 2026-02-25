@@ -399,15 +399,14 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
     match bellman_ford vertices edges ~src:0 with
     | `Negative_cycle _ -> Solution.Unsat
     | `No_negative_cycle (distances, _) ->
-      let distances_unwrapped = Array.filter_opt distances in
+      let dist = Array.filter_opt distances in
       let n = Array.length vertices in
-      let offset = distances_unwrapped.(n - 1) in
+      let offset = dist.(n - 1) in
       let keys = Map.keys key_to_index in
       let model = 
         Model.of_local
-          distances_unwrapped
-          ~keys
-          ~lookup:(fun dist symbol_key ->
+          keys
+          ~lookup:(fun symbol_key ->
             match Map.find key_to_index symbol_key with
             | None -> None
             | Some i ->
