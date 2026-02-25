@@ -127,7 +127,7 @@ let rec rewrite : type k.
 
     {["Atoms list has size 2"]}
 *)
-let rec extract (formula : (bool, 'k) Formula.t) : atom list =
+let rec extract (formula : (bool, 'k) Formula.t) : atom list * (bool, 'k) Formula.t list =
   formula
   |> function
   | Not Binop (Greater_than, Key I x, Key I y)
@@ -160,72 +160,75 @@ let rec extract (formula : (bool, 'k) Formula.t) : atom list =
   | Binop (Equal, Key I x, Const_int c)
   | Binop (Equal, Const_int c, Key I x) ->
     [ { x = Symbol_key x; y = Z0; c; };
-      {x = Z0; y = Symbol_key x; c = -c } ]
+      {x = Z0; y = Symbol_key x; c = -c } ], []
 
   (* x = y -> (x - y) <= 0 and (y - x) <= 0*)
   | Binop (Equal, Key I x, Key I y) ->
     [ { x = Symbol_key x; y = Symbol_key y; c = 0 };
-      { x = Symbol_key y; y = Symbol_key x; c = 0 } ]
+      { x = Symbol_key y; y = Symbol_key x; c = 0 } ], []
 
   (* x <= y -> (x - y <= 0)
         y >= x -> (x - y <= 0)
         not (x > y) -> x <= y -> (x - y) <= 0 *)
   | Binop (Less_than_eq, Key I x, Key I y)
   | Binop (Greater_than_eq, Key I y, Key I x) ->
-    [{ x = Symbol_key x; y = Symbol_key y; c = 0 }]
+    [{ x = Symbol_key x; y = Symbol_key y; c = 0 }], []
 
   (* x <= c -> (x - 0) <= c
         c >= x -> (x - 0) <= c
         not (x > c) -> x <= c -> (x - 0) <= c *)
   | Binop (Less_than_eq, Key I x, Const_int c)
   | Binop (Greater_than_eq, Const_int c, Key I x) ->
-    [{ x = Symbol_key x; y = Z0; c }]
+    [{ x = Symbol_key x; y = Z0; c }], []
 
   (* x < c -> x - 0 <= c - 1 *)
   | Binop (Less_than, Key I x, Const_int c)
   | Binop (Greater_than, Const_int c, Key I x) ->
-    [{ x = Symbol_key x; y = Z0; c = c - 1 }]
+    [{ x = Symbol_key x; y = Z0; c = c - 1 }], []
 
   (* x >= c -> 0 - x <= -c
        not (x < c) -> x >= c -> (0 - x) <= -c *)
   | Binop (Greater_than_eq, Key I x, Const_int c)
   | Binop (Less_than_eq, Const_int c, Key I x) ->
-    [ {x = Z0; y = Symbol_key x; c = -c}  ]
+    [ {x = Z0; y = Symbol_key x; c = -c}  ], []
 
   (* x > c -> (0 - x) <= -(c + 1) *)
   | Binop (Greater_than, Key I x, Const_int c)
     | Binop (Less_than, Const_int c, Key I x) ->
-    [{ x = Z0; y = Symbol_key x; c = -(c + 1) }]
+    [{ x = Z0; y = Symbol_key x; c = -(c + 1) }], []
 
   (* x > y -> (y - x) <= -1 (difference is at least 1) *)
   | Binop (Greater_than, Key I x, Key I y)
     | Binop (Less_than,    Key I y, Key I x) ->
-    [{ x = Symbol_key y; y = Symbol_key x; c = -1 }]
+    [{ x = Symbol_key y; y = Symbol_key x; c = -1 }], []
 
   (* x + c <= y  ->  x - y <= -c *)
   | Binop (Less_than_eq, Binop (Plus, Key I x, Const_int c), Key I y)
     | Binop (Less_than_eq, Binop (Plus, Const_int c, Key I x), Key I y) ->
-    [{ x = Symbol_key x; y = Symbol_key y; c = -c }]
+    [{ x = Symbol_key x; y = Symbol_key y; c = -c }], []
 
   (* y <= x + c  ->  y - x <= c *)
   | Binop (Less_than_eq, Key I y, Binop (Plus, Key I x, Const_int c))
     | Binop (Less_than_eq, Key I y, Binop (Plus, Const_int c, Key I x)) ->
-    [{ x = Symbol_key y; y = Symbol_key x; c }]
+    [{ x = Symbol_key y; y = Symbol_key x; c }], []
 
   (* x - c <= y  ->  x - y <= c *)
   | Binop (Less_than_eq, Binop (Minus, Key I x, Const_int c), Key I y) ->
-    [{ x = Symbol_key x; y = Symbol_key y; c }]
+    [{ x = Symbol_key x; y = Symbol_key y; c }], []
 
   (* y <= x - c  ->  y - x <= -c *)
   | Binop (Less_than_eq, Key I y, Binop (Minus, Key I x, Const_int c)) ->
-    [{ x = Symbol_key y; y = Symbol_key x; c = -c }]
+    [{ x = Symbol_key y; y = Symbol_key x; c = -c }], []
 
   | And exprs ->
     exprs
-    |> List.map ~f:extract
-    |> List.concat
-  | _ ->
-    []
+    |> List.fold ~init:([], []) ~f:(fun (a_acc, f_acc) expr ->
+         let (a, f) = extract expr in
+         (List.rev_append a a_acc,
+          List.rev_append f f_acc)
+       )
+    |> fun (a, f) -> (List.rev a, List.rev f)
+  | _ -> [], [formula]
 ;;
 
 let bellman_ford (vertices : int array) (edges : (int * int * int) array) ~(src : int) =
@@ -388,7 +391,7 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
     formula
     |> rewrite
     |> extract
-    |> normalize
+    |> fun (atoms, check_exprs) -> normalize atoms
     |> fun (vertices, edges, key_to_index) ->
     match bellman_ford vertices edges ~src:0 with
     | `Negative_cycle _ ->
@@ -398,7 +401,7 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
       let n = Array.length vertices in
       let offset = distances_unwrapped.(n - 1) in
       let keys = Map.keys key_to_index in
-      Solution.Sat (
+      let model = 
         Model.of_local
           distances_unwrapped
           ~keys
@@ -408,40 +411,13 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
             | Some i ->
               Some (-1 * (dist.(i) - offset))
           )
-      )
+      in
+      Formula.substitute (And check_exprs) model
+      |> Formula.checks_out
+      |> function
+        | true ->
+        Solution.Sat model
+        | false -> 
+        Solution.Unknown
 ;;
-
-let extend
-  (formula : (bool, 'k) Formula.t)
-  (solution_state : 'k Model.t)
-  : 'k Model.t
-  =
-  match check formula with
-  | Solution.Unsat
-    | Solution.Unknown ->
-    failwith "Diff.extend: check returned Unsat/Unknown (invariant violated)"
-
-  | Solution.Sat graph ->
-    Model.fold graph
-      ~init:solution_state
-      ~f:(fun acc ~key ~data ->
-        let sym = (Utils.Separate.I key) in
-        match acc.value sym with
-        | Some _ ->
-          acc
-        | None ->
-          {
-            value =
-              (fun (type a) (s : (a, 'k) Symbol.t) ->
-                match s with
-                | I k when k = key ->
-                  Some (Obj.magic data : a)
-                | _ ->
-                  acc.value s
-              );
-
-            keys =
-              key :: acc.keys
-          }
-      )
 

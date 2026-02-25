@@ -93,17 +93,10 @@ module type LOGIC = sig
   (** Whatever type the logic works with. *)
   type atom
 
-  (** Transform [(bool, 'k) t] FORMULA into a list of atoms to pass into [solve]. *)
-  val extract : (bool, 'k) t -> atom list
-
   (** Returns a LOCAL solution. Used in the {!solve} loop to recursively check
       if the current Solution state is OK or not; it's NOT used to assign values.
       That's what {!extend} is for. *)
   val check : (bool, 'k) t -> 'k Solution.t
-
-  (** Extend the solution to [(bool, 'k) t] FORMULA with its current solution state
-      'k Model.t MODEL to spit out a new MODEL. *)
-  val extend : (bool, 'k) t -> 'k Model.t -> 'k Model.t
 end
 
 
@@ -187,11 +180,11 @@ let to_string (type a) (x : (a, 'k) t) : string =
     | Const_int i -> string_of_int i
     | Const_bool b -> string_of_bool b
     | Key I k
-    | Key B k -> begin
-      match Hashtbl.find env k with
-      | Some c -> String.of_char c
-      | None -> let c = next_c () in Hashtbl.set env ~key:k ~data:c; String.of_char c
-    end
+      | Key B k -> begin
+        match Hashtbl.find env k with
+        | Some c -> String.of_char c
+        | None -> let c = next_c () in Hashtbl.set env ~key:k ~data:c; String.of_char c
+        end
     | Not e -> Format.sprintf "(not %s)" (to_string e)
     | And e_ls -> List.fold e_ls ~init:"" ~f:(fun acc e -> 
       if String.is_empty acc then to_string e else acc ^ " ^ " ^ to_string e
@@ -320,6 +313,36 @@ and and_ (e_ls : (bool, 'k) t list) : (bool, 'k) t =
       | other when equal other e -> e
       | other -> And [ e ; other ]
 
+let rec eval_int (f : (int, 'k) t) : int =
+  match f with
+  | Const_int i -> i
+
+  | Binop (Plus, a, b) ->
+      eval_int a + eval_int b
+
+  | Binop (Minus, a, b) ->
+      eval_int a - eval_int b
+
+  | Binop (Times, a, b) ->
+      eval_int a * eval_int b
+
+  | _ ->
+      failwith "Expected fully substituted integer expression!"
+
+let rec checks_out : type a k. (a, k) t -> a =
+  function
+  | Const_int i -> i
+  | Const_bool b -> b
+  | Binop (op, l, r) ->
+      let f = Binop.to_arithmetic op in
+      f (checks_out l) (checks_out r)
+  | And ls ->
+      List.for_all ls ~f:checks_out
+  | Not x ->
+      not (checks_out x)
+  | f ->
+      failwith ("Unexpected form in boolean evaluation: " ^ (to_string f))
+
 module Make_transformer (X : S) = struct
   let rec transform : type a. (a, 'k) t -> (a, 'k) X.t = fun e ->
     match e with
@@ -432,61 +455,60 @@ let branch splits conjunction =
   aux [] exprs
 
 let extract_all_keys : type a k. (a, k) t -> int list =
-  let rec go : type a k. (a, k) t -> int list = function
+  let rec aux : type a k. (a, k) t -> int list = function
     | Const_int _ -> []
     | Const_bool _ -> []
     | Key (I sym)
       | Key (B sym) -> [sym]
-    | Not t -> go t
-    | And ts -> List.concat_map ts ~f:go
-    | Binop (_, lhs, rhs) -> go lhs @ go rhs
+    | Not t -> aux t
+    | And ts -> List.concat_map ts ~f:aux
+    | Binop (_, lhs, rhs) -> aux lhs @ aux rhs
   in
-  go
+  aux
 ;;
 
 let rec substitute :
   type a k.
   (a, k) t -> k Model.t -> (a, k) t =
   fun formula model ->
-    match formula with
-    | Const_bool _
+  match formula with
+  | Const_bool _
     | Const_int _ ->
-        formula
+    formula
 
-    | Key sym ->
-      begin match sym with
+  | Key sym ->
+    begin match sym with
       | I _ ->
-          begin match model.value sym with
+        begin match model.value sym with
           | Some value -> Const_int value
-          | None -> formula
+          | None -> Const_int 0
           end
       | B _ ->
-          formula
-    end
+        Const_bool true
+      end
 
-    | Binop (op, l, r) ->
-        begin match op with
-        | Plus | Minus | Times | Divide | Modulus | Not_equal | Or ->
-            Binop (op,
-                   substitute l model,
-                   substitute r model)
+  | Binop (op, l, r) ->
+    begin match op with
+      | Plus | Minus | Times | Divide | Modulus | Not_equal | Or ->
+        Binop (op,
+          substitute l model,
+          substitute r model)
 
-        | Less_than
+      | Less_than
         | Less_than_eq
         | Greater_than
         | Greater_than_eq
         | Equal ->
-            Binop (op,
-                   substitute l model,
-                   substitute r model)
-        end
+        Binop (op,
+          substitute l model,
+          substitute r model)
+      end
 
-    | Not f ->
-        Not (substitute f model)
+  | Not f ->
+    Not (substitute f model)
 
-    | And fs ->
-        And (List.map fs ~f:(fun f -> substitute f model))
-
+  | And fs ->
+    And (List.map fs ~f:(fun f -> substitute f model))
 
 (* let append_line filename line = *)
 (*   Out_channel.with_file ~append:true filename ~f:(fun oc -> *)
@@ -514,29 +536,34 @@ module Make_solver (X : SOLVABLE) = struct
 
       ...
 
-      This is essentially a dumbed down version of the DPLL(T) algorithm.
+      This is basically a dumbed down version of the DPLL algorithm.
   *)
   let rec solve (exprs : (bool, 'k) t list) : 'k Solution.t =
-    if List.is_empty X.logics then
-      X.solve [M.transform (and_ exprs)]
-    else
-      exprs
-      |> and_
-      |> function
-      | Const_bool false -> Solution.Unsat
-      | Const_bool true -> Solution.Sat Model.empty
-      (* #region solve_check *)
-      | formula ->
-      (* maybe this should be an absolute path, but this works fine *)
-      (* append_line "./formulas.txt" (Format.sprintf "%s\n" (to_string formula)); *)
-      (* or print the line to stdout like this: *)
-      (* Format.printf "%s\n" (to_string e); *)
+    let formula = and_ exprs in
+    match formula with
+    | Const_bool false -> Solution.Unsat
+    | Const_bool true -> Solution.Sat Model.empty
+    | _ ->
+      match branch X.splits formula with
+      | Some (left, right, rest) ->
+        let mk_branch side =
+          match rest with
+          | And xs -> And (side :: xs)
+          | _ -> And [side; rest]
+        in
+        begin match solve [mk_branch left] with
+          | Solution.Sat _ as sat -> sat
+          | Solution.Unsat -> solve [mk_branch right]
+          | Solution.Unknown -> Solution.Unknown
+          end
+      | None ->
         let formula_keys = extract_all_keys formula in
-        let theory_guard =
+
+        let solution =
           List.fold_until
             X.logics
-            ~init:formula_keys
-            ~f:(fun remaining_keys (module Logic) ->
+            ~init:(formula_keys, Model.empty)
+            ~f:(fun (remaining_keys, merged_model) (module Logic) ->
               match Logic.check formula with
               | Unsat ->
                 Stop Solution.Unsat
@@ -546,76 +573,34 @@ module Make_solver (X : SOLVABLE) = struct
                   List.filter remaining_keys ~f:(fun k ->
                     not (List.mem model.keys k ~equal:Int.equal))
                 in
-                Continue remaining_keys
+                let merged_model =
+                  Model.merge merged_model model
+                in
+                Continue (remaining_keys, merged_model)
 
-              | _ ->
-                Continue remaining_keys
+              | Unknown ->
+                Continue (remaining_keys, merged_model)
             )
-            ~finish:(fun remaining_keys ->
+            ~finish:(fun (remaining_keys, merged_model) ->
               if List.is_empty remaining_keys then
-                (* Then this MAY be satisfiable, we have to recheck *)
-                Solution.Sat Model.empty 
+                Solution.Sat merged_model
               else
                 Solution.Unknown
             )
         in
-        match theory_guard with
-        | Solution.Unsat -> Solution.Unsat
+        match solution with
         | Solution.Unknown ->
-          let result = X.solve [M.transform formula]
-          in
+          let result = X.solve [M.transform formula] in
           begin match result with
-          | Solution.Sat model ->
-              Solution.Sat {value = model.value; keys = (extract_all_keys formula)}
-          | _ ->
-            result
-          end
-        | Solution.Sat _ ->
-          (* Then it MIGHT be satisfiable, we have to check... *)
-          (* #endregion solve_check *)
-          match branch X.splits formula with
-
-          (* #region solve_branch_leaf *)
-          | None ->
-            (* No formula(s) to split on means we can treat
-               what we have as our current formula state as a strict conjunction. *)
-            let model =
-              List.fold X.logics
-                ~init:Model.empty
-                ~f:(fun acc (module L) ->
-                  L.extend formula acc
-                )
-            in
-            Solution.Sat model
-          (* #endregion solve_branch_leaf *)
-
-          (* #region solve_branch_exists *)
-          | Some (left, right, rest) ->
-            (* Caller (this context) explicitly makes the [And] conjunction between the split
-               left and right formulas and the [rest] formula. *)
-            let left_branch =
-              match rest with
-              | And xs -> And (left :: xs)
-              | _ -> And [left; rest]
-            in
-
-            let right_branch =
-              match rest with
-              | And xs -> And (right :: xs)
-              | _ -> And [right; rest]
-            in
-            (* #endregion solve_branch_exists *)
-
-            (* #region solve_try *)
-            match solve [left_branch] with
             | Solution.Sat model ->
-              Solution.Sat model
+              Solution.Sat
+                { value = model.value
+                  ; keys = extract_all_keys formula
+                }
+            | _ -> result
+            end
 
-            | Solution.Unsat ->
-              solve [right_branch]
-
-            | Solution.Unknown ->
-              X.solve [M.transform formula]
-  (* #endregion solve_try *)
+        | _ ->
+          solution
 end
 
