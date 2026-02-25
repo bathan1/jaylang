@@ -435,18 +435,13 @@ let branch splits conjunction =
   let rec aux acc = function
     | [] -> None
     | x :: xs ->
-      let rest =
-        match List.rev_append acc xs with
-        | [] -> Const_bool true
-        | [e] -> e
-        | es -> And es
-      in
+      let rest = List.rev_append acc xs in
       let rec try_splitters = function
         | [] -> aux (x :: acc) xs
         | split :: ss ->
           match split x with
           | Some (left, right) ->
-            Some (left, right, rest)
+            Some (left :: rest, right :: rest)
           | None ->
             try_splitters ss
       in
@@ -547,16 +542,11 @@ module Make_solver (X : SOLVABLE) = struct
     | Const_bool true -> Solution.Sat Model.empty
     | _ ->
       match branch X.splits formula with
-      | Some (left, right, rest) ->
-        let mk_branch side =
-          match rest with
-          | And xs -> And (side :: xs)
-          | _ -> And [side; rest]
-        in
-        begin match solve [mk_branch left] with
+      | Some (left, right) ->
+        begin match solve left with
           | Solution.Sat _ as sat -> sat
-          | Solution.Unsat -> solve [mk_branch right]
-          | Solution.Unknown -> Solution.Unknown
+          | Solution.Unsat
+          | Solution.Unknown -> solve right
           end
       | None ->
         let formula_keys = extract_all_keys formula in
