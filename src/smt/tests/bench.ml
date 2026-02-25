@@ -19,13 +19,7 @@ and e = symbol 'e'
 
 module Backend_z3 = Formula.Make_solver (Typed_z3)
 
-module Hybrid_z3 = Formula.Make_solver (struct
-  include Typed_z3
-  let logics : (module Formula.LOGIC) list = [
-    (module Difference)
-  ]
-  let splits = [Splits.neq]
-end)
+module Hybrid_z3 = Formula.Make_solver (Blue3)
 
 let vars_of_model (model : 'k Model.t) =
   Core.List.map model.keys ~f:(fun uid ->
@@ -129,7 +123,7 @@ let warmup () =
 let () =
   (* --- CSV header --- *)
   printf
-    "id,formula_text,solution_text,model_text,hybrid_time,backend_only_time,is_hybrid_winner,hybrid_time_diff\n";
+    "id,formula_text,solution_text,model_text,blue3_time,z3_only_time,is_blue3_winner,blue3_time_diff\n";
 
   warmup ();
 
@@ -148,7 +142,7 @@ let () =
         (* --- Solve with Hybrid --- *)
         let hybrid =
           solve_with_time
-            ~name:"Hybrid"
+            ~name:"Blue3"
             Hybrid_z3.solve
             ast
         in
@@ -156,7 +150,7 @@ let () =
         (* --- Solve with Backend --- *)
         let backend =
           solve_with_time
-            ~name:"Backend"
+            ~name:"Z3"
             Backend_z3.solve
             ast
         in

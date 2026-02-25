@@ -341,7 +341,7 @@ let rec checks_out : type a k. (a, k) t -> a =
   | Not x ->
       not (checks_out x)
   | f ->
-      failwith ("Unexpected form in boolean evaluation: " ^ (to_string f))
+      failwith ("can't evaluate whether that formula checks out: " ^ (to_string f))
 
 module Make_transformer (X : S) = struct
   let rec transform : type a. (a, 'k) t -> (a, 'k) X.t = fun e ->

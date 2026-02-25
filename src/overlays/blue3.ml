@@ -36,3 +36,7 @@ module Make () = (struct
   let splits = [Splits.neq]
   let logics : (module Formula.LOGIC) list = [(module Difference)]
 end)
+
+module Default = Make ()
+
+include Default
