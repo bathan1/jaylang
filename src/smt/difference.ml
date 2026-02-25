@@ -361,21 +361,24 @@ let rec contains_mul_or_div : type s k.
   | _ ->
     false
 
-(** Search for the tightest upper bounds of each unique [x, y] variable in ATOMS.
-    This is {i decidable}, so it only returns SAT or UNSAT (no unknown cases).
-
-    x < 0
-
+(** Search for the tightest upper bounds of each unique [x, y] variable in FORMULA.
 
     {3 Example}
     {[
-    let () =
-      let atoms = [
-        Diff.atom ~x:0 ~y:1 ~c:3;   (* x - y <= 3 *)
-        Diff.atom ~x:1 ~y:Const ~c:10;  (* y <= 10 *)
-      ] in
+    open Smt.Formula
+    open Smt.Binop
+    open Smt.Symbol
 
-      match solve atoms with
+    let () =
+      let key c = Key (AsciiSymbol.make_int c) in
+      in
+      let formula = And [
+        Binop (Less_than_eq, key 'a', Const_int 2);
+        Binop (Greater, key 'b', key 'a');
+      ] 
+      in
+
+      match solve formula with
       | Sat model ->
           (* Access a (tight) upper bound: model.value (I 0) -> int option *)
           printf "SAT: upper bound on x = %d\n"
@@ -394,8 +397,7 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
     |> fun (atoms, check_exprs) -> normalize atoms
     |> fun (vertices, edges, key_to_index) ->
     match bellman_ford vertices edges ~src:0 with
-    | `Negative_cycle _ ->
-      Solution.Unsat
+    | `Negative_cycle _ -> Solution.Unsat
     | `No_negative_cycle (distances, _) ->
       let distances_unwrapped = Array.filter_opt distances in
       let n = Array.length vertices in

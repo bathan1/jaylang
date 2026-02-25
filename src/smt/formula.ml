@@ -100,7 +100,7 @@ module type LOGIC = sig
 end
 
 
-(** An adapter type for calling an SMT solver backend.
+(** Adapter type for calling an SMT solver backend.
 
     You can bind a [LOGIC] list of modules to LOGICS along with 
     branch functions ({!split_fn}) to SPLITS in order
@@ -520,6 +520,8 @@ let rec substitute :
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
+  let is_backend_used = ref false
+
   (** Search for a [Smt.Solution solution] that satisfies the 
       {i conjunction} of [bool, 'k) t list] EXPRS for [int]
       TRIES_LEFT more recursive calls at most, which by 
@@ -590,6 +592,7 @@ module Make_solver (X : SOLVABLE) = struct
         in
         match solution with
         | Solution.Unknown ->
+          is_backend_used := true;
           let result = X.solve [M.transform formula] in
           begin match result with
             | Solution.Sat model ->

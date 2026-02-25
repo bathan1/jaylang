@@ -139,7 +139,7 @@ let () =
     "\"" ^ Core.String.escaped s ^ "\""
   in
 
-  Printf.printf "index,expected,actual,status,formula,model,substituted,error\n";
+  Printf.printf "index,expected,actual,status,z3_used,formula,model,substituted,error\n";
 
   List.iteri
     (fun idx input ->
@@ -148,7 +148,10 @@ let () =
         let formula_text = Formula.to_string ast in
 
         let expected = Checker.solve [ast] in
+
+        Solver.is_backend_used := false;
         let own_result = Solver.solve [ast] in
+        let used_z3 = !(Solver.is_backend_used) in
 
         let expected_str =
           match expected with
@@ -176,22 +179,22 @@ let () =
           let subbed = Formula.substitute ast model in
           begin match Checker.solve [subbed] with
             | Solution.Sat _ ->
-              Printf.printf "%d,%s,%s,OK,%s,%s,%s,\n"
-                idx expected_str actual_str
+              Printf.printf "%d,%s,%s,OK,%b,%s,%s,%s,\n"
+                idx expected_str actual_str used_z3
                 (escape_csv formula_text)
                 (escape_csv (pp_model model))
                 (escape_csv (Formula.to_string subbed))
 
             | Solution.Unsat ->
-              Printf.printf "%d,%s,%s,MISMATCH,%s,%s,%s,Incorrect model\n"
-                idx expected_str actual_str
+              Printf.printf "%d,%s,%s,MISMATCH,%b,%s,%s,%s,Incorrect model\n"
+                idx expected_str actual_str used_z3
                 (escape_csv formula_text)
                 (escape_csv (pp_model model))
                 (escape_csv (Formula.to_string subbed))
 
             | Solution.Unknown ->
-              Printf.printf "%d,%s,%s,ERROR,%s,%s,%s,Z3 could not validate substitution\n"
-                idx expected_str actual_str
+              Printf.printf "%d,%s,%s,ERROR,%b,%s,%s,%s,Z3 could not validate substitution\n"
+                idx expected_str actual_str used_z3
                 (escape_csv formula_text)
                 (escape_csv (pp_model model))
                 (escape_csv (Formula.to_string subbed))
@@ -200,26 +203,26 @@ let () =
         (* ---------------- MISMATCH CASES ---------------- *)
 
         | Solution.Unsat, Solution.Sat model ->
-          Printf.printf "%d,%s,%s,MISMATCH,%s,%s,,Expected UNSAT but got SAT\n"
-            idx expected_str actual_str
+          Printf.printf "%d,%s,%s,MISMATCH,%b,%s,%s,,Expected UNSAT but got SAT\n"
+            idx expected_str actual_str used_z3
             (escape_csv formula_text)
             (escape_csv (pp_model model))
 
         | Solution.Sat _, Solution.Unsat ->
-          Printf.printf "%d,%s,%s,MISMATCH,%s,,,%s\n"
-            idx expected_str actual_str
+          Printf.printf "%d,%s,%s,MISMATCH,%b,%s,,,%s\n"
+            idx expected_str actual_str used_z3
             (escape_csv formula_text)
             "Expected SAT but got UNSAT"
 
         | Solution.Unknown, _ ->
-          Printf.printf "%d,%s,%s,ERROR,%s,,,%s\n"
-            idx expected_str actual_str
+          Printf.printf "%d,%s,%s,ERROR,%b, %s,,,%s\n"
+            idx expected_str actual_str used_z3
             (escape_csv formula_text)
             "Z3 returned UNKNOWN"
 
         | _, Solution.Unknown ->
-          Printf.printf "%d,%s,%s,ERROR,%s,,,%s\n"
-            idx expected_str actual_str
+          Printf.printf "%d,%s,%s,ERROR,%b, %s,,,%s\n"
+            idx expected_str actual_str used_z3
             (escape_csv formula_text)
             "Own solver returned UNKNOWN"
 

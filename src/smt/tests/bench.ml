@@ -22,7 +22,7 @@ module Backend_z3 = Formula.Make_solver (Typed_z3)
 module Hybrid_z3 = Formula.Make_solver (struct
   include Typed_z3
   let logics : (module Formula.LOGIC) list = [
-    (module Diff)
+    (module Difference)
   ]
   let splits = [Splits.neq]
 end)
