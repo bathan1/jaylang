@@ -63,9 +63,17 @@ module Of_logger (T : Utils.Logger.TRANSFORMER with type B.a = Stat.t) : S with 
     module Lwt_eval = Evaluator.Make (Key) (Make_tq) (Pause.Lwt) (Lwt_log)
     module Eval = Evaluator.Make (Key) (Make_tq) (Pause.Id) (Log)
 
-    module Default_Z3 = Overlays.Typed_z3.Make ()
-    module Default_solver = Smt.Formula.Make_solver (Default_Z3)
+    module Blue3 = Overlays.Blue3.Make ()
+    module Z3 = Overlays.Typed_z3.Make ()
 
+    let solve =
+      match Sys.getenv "USE_BLUE3" with
+      | Some _ ->
+          let module S = Smt.Formula.Make_solver(Blue3) in
+          S.solve
+      | _ ->
+          let module S = Smt.Formula.Make_solver(Z3) in
+          S.solve
 
     (*
       ----------------------
@@ -77,7 +85,7 @@ module Of_logger (T : Utils.Logger.TRANSFORMER with type B.a = Stat.t) : S with 
     let test_with_timeout 
       : options:Options.t -> Lang.Ast.Embedded.t -> Status.Terminal.t * tape
       = fun ~options prog ->
-      let main = Lwt_eval.c_loop ~options C.ceval Default_solver.solve prog in
+      let main = Lwt_eval.c_loop ~options C.ceval solve prog in
       try Lwt_main.run @@ Lwt_log.run main with
       | Lwt_unix.Timeout -> Status.Timeout, T.B.empty (* FIXME: timeout doesn't provide stats *)
 
