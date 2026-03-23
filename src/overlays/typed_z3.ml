@@ -90,23 +90,32 @@ module Make_of_context (C : CONTEXT) : Formula.SOLVABLE = struct
 
   let splits = [(* Splits.neq *)]
   let logics : (module Formula.LOGIC) list = [(* (module Difference) *)]
-
+  
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
     let e = and_ exprs in
     if Z3.Expr.equal e (const_bool false)
     then Unsat
-    else
-      match Z3.Solver.check solver [ e ] with
-      | Z3.Solver.SATISFIABLE ->
-        let model = Option.value_exn @@ Z3.Solver.get_model solver in
-        let value : type a. (a, 'k) Symbol.t -> a option = fun s ->
-          match s with
-          | I _ -> a_of_expr model (symbol s) unbox_int_expr
-          | B _ -> a_of_expr model (symbol s) unbox_bool_expr
-        in
-        Sat { value; keys = []; }
-      | UNKNOWN -> Unknown
-      | UNSATISFIABLE -> Unsat
+    else begin
+      (* Must use the solver stack in order to not keep decls around from previous solves *)
+      (* (and this is faster than making a new solver) *)
+      Z3.Solver.push solver;
+      let result = Z3.Solver.check solver [ e ] in
+      let solution =
+        match result with
+        | Z3.Solver.SATISFIABLE ->
+          let model = Stdlib.Option.get @@ Z3.Solver.get_model solver in
+          let value : type a. (a, 'k) Symbol.t -> a option = fun s ->
+            match s with
+            | I _ -> a_of_expr model (symbol s) unbox_int_expr
+            | B _ -> a_of_expr model (symbol s) unbox_bool_expr
+          in
+          Solution.Sat { value; keys = [] }
+        | UNKNOWN -> Unknown
+        | UNSATISFIABLE -> Unsat
+      in
+      Z3.Solver.pop solver 1;
+      solution
+    end
 end
 
 module Make () = Make_of_context (struct let ctx = Z3.mk_context [] end)

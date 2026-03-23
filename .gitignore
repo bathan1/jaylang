@@ -73,3 +73,6 @@ vendor
 
 # Hoisted odoc build
 /docs/public/
+
+# sqlite
+*.db

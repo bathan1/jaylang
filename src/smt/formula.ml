@@ -196,9 +196,24 @@ let to_string (type a) (x : (a, 'k) t) : string =
 
 (* Polymorphic equality is good enough here because keys just use ints
   underneath. I would only write structural equality anyways. *)
-let equal a b =
-  Core.phys_equal a b
-  || Core.Poly.equal a b
+(* let equal a b = *)
+(*   Core.phys_equal a b *)
+(*   || Core.Poly.equal a b *)
+let rec equal : type a. (a, 'k) t -> (a, 'k) t -> bool = fun x y ->
+  phys_equal x y || poly_equal x y
+and poly_equal : type a b. (a, 'k) t -> (b, 'k) t -> bool = fun x y ->
+  match x, y with
+  | Const_int i, Const_int j -> i = j
+  | Const_bool b, Const_bool c -> Bool.equal b c
+  | Key I k, Key I k' -> k = k'
+  | Key B k, Key B k' -> k = k'
+  | Not e, Not e' -> equal e e'
+  | And l, And l' -> List.equal equal l l'
+  | Binop (b, l, r), Binop (b', l', r') ->
+    Binop.poly_equal b b'
+    && poly_equal l l'
+    && poly_equal r r'
+  | _ -> false
 
 let const_int i = Const_int i
 let const_bool b = Const_bool b

@@ -47,3 +47,19 @@ let to_string (type a b) (binop : (a * a * b) t) : string =
   | Equal -> "="
   | Not_equal -> "<>"
   | Or -> "||"
+
+let poly_equal (type a b) (x : a t) (y : b t) : bool =
+  match x, y with
+  | Plus, Plus
+  | Minus, Minus
+  | Times, Times
+  | Divide, Divide
+  | Modulus, Modulus
+  | Less_than, Less_than
+  | Less_than_eq, Less_than_eq
+  | Greater_than, Greater_than
+  | Greater_than_eq, Greater_than_eq
+  | Equal, Equal
+  | Not_equal, Not_equal
+  | Or, Or -> true
+  | _ -> false
