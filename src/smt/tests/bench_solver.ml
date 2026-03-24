@@ -5,6 +5,7 @@ open Core
 open Smt
 open Smt.Symbol
 open Overlays
+open Utils
 module Solver = Formula.Make_solver (Blue3)
 (* ---------- Helpers ---------- *)
 let symbol = AsciiSymbol.make_int
@@ -35,7 +36,7 @@ let () =
     match Sys.get_argv () with
     | [| _; n |] -> Int64.of_string n
     | _ ->
-      eprintf "Usage: bench <n_trials> < formulas.txt\n";
+      eprintf "Usage: dune exec ./bench_solver.exe -- <n_trials> < formulas.txt\n";
       exit 1
   in
   let formulae = Boolean.from_stdin () in
@@ -76,23 +77,15 @@ let () =
   List.iter parsed ~f:(fun (idx, _input, ast, formula_text) ->
     let result_ref = ref None in
     let backend_used_ref = ref false in
-    let samples =
-      Benchmark.latencyN
-        n_trials
-        [ ("solver",
-            (fun () ->
-              Solver.is_backend_used := false;
-              let r = Solver.solve [ast] in
-              result_ref := Some r;
-              backend_used_ref := !Solver.is_backend_used),
-            ())
-        ]
-    in
-    let time_us =
-      match samples with
-      | [ (_, [ t ]) ] ->
-        t.Benchmark.wall *. 1_000_000.0 /. Int64.to_float n_trials
-      | _ -> failwith "Unexpected latencyN output"
+    let time_us = Benchmarker.avg_latency_n
+      n_trials
+      ~label:"solver"
+      ~f:(fun () ->
+        Solver.is_backend_used := false;
+        let r = Solver.solve [ast] in
+        result_ref := Some r;
+        backend_used_ref := !Solver.is_backend_used
+      )
     in
     let result =
       match !result_ref with

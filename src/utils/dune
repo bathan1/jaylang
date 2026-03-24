@@ -10,6 +10,7 @@
   preface
   mtime
   mtime.clock.os
+  benchmark
   )
  (synopsis "Utils module for the Jaylang project")
  (inline_tests)
