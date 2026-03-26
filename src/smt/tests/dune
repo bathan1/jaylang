@@ -28,3 +28,17 @@
  (preprocess
   (pps ppx_compare ocaml-monadic)))
 
+(executable
+ (name check)
+ (public_name jay.smt.check)
+ (modules check)
+ (libraries
+  core
+  preface
+  z3
+  benchmark
+  utils
+  smt
+  overlays)
+ (preprocess
+  (pps ppx_compare ocaml-monadic)))

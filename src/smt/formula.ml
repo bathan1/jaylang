@@ -358,6 +358,80 @@ let rec checks_out : type a k. (a, k) t -> a =
   | f ->
       failwith ("can't evaluate whether that formula checks out: " ^ (to_string f))
 
+let rec rewrite_int : type k.
+  (int, k) t -> (int, k) t =
+  function
+  | Binop (Plus, a, b) ->
+    Binop (Plus, rewrite_int a, rewrite_int b)
+
+  | Binop (Minus, a, b) ->
+    Binop (Minus, rewrite_int a, rewrite_int b)
+
+  | t ->
+    t
+
+let rec linearize : type k.
+  (int, k) t -> (int * int) option =
+  function
+  | Key (I x) ->
+    Some (x, 0)
+
+  | Binop (Plus, t, Const_int c) ->
+    Option.map (linearize t) ~f:(fun (x, k) ->
+      (x, k + c)
+    )
+
+  | Binop (Plus, Const_int c, t) ->
+    Option.map (linearize t) ~f:(fun (x, k) ->
+      (x, k + c)
+    )
+
+  | Binop (Minus, t, Const_int c) ->
+    Option.map (linearize t) ~f:(fun (x, k) ->
+      (x, k - c)
+    )
+
+  | _ ->
+    None
+
+let rec rewrite : type k.
+  (bool, k) t -> (bool, k) t =
+  function
+  | Binop (Less_than_eq, Const_int c1, rhs) ->
+    rewrite (Binop (Greater_than_eq, rhs, Const_int c1))
+  | Binop (Less_than, Const_int c1, rhs) ->
+    rewrite (Binop (Greater_than, rhs, Const_int c1))
+  | Binop (Greater_than_eq, Const_int c1, rhs) ->
+    rewrite (Binop (Less_than_eq, rhs, Const_int c1))
+  | Binop (Greater_than, Const_int c1, rhs) ->
+    rewrite (Binop (Less_than, rhs, Const_int c1))
+
+  | Not (Binop (Less_than, a, b)) ->
+    rewrite (Binop (Greater_than_eq, a, b))
+  | Not (Binop (Less_than_eq, a, b)) ->
+    rewrite (Binop (Greater_than, a, b))
+  | Not (Binop (Greater_than, a, b)) ->
+    rewrite (Binop (Less_than_eq, a, b))
+  | Not (Binop (Greater_than_eq, a, b)) ->
+    rewrite (Binop (Less_than, a, b))
+  | Binop ((Less_than | Less_than_eq
+    | Greater_than | Greater_than_eq) as op,
+    lhs,
+    Const_int c2) ->
+    let lhs = rewrite_int lhs in
+    begin
+      match linearize lhs with
+      | Some (x, k') ->
+        Binop (op,
+          Key (I x),
+          Const_int (c2 - k'))
+      | None ->
+        Binop (op, lhs, Const_int c2)
+      end
+  | And xs -> And (List.map xs ~f:rewrite)
+  | f -> f
+
+
 module Make_transformer (X : S) = struct
   let rec transform : type a. (a, 'k) t -> (a, 'k) X.t = fun e ->
     match e with
@@ -375,15 +449,14 @@ type 'k solver = (bool, 'k) t list -> 'k Solution.t
 (** Branch CONJUNCTION into equivalent left and right expressions
     if that transformation is encoded by a function in SPLITS.
 *)
-let branch 
+let branch
     (splits : 'k split_fn list)
     (conjunction : (bool, 'k) t)
-    : ((bool, 'k) t list * (bool, 'k) t list) option =
+    : ((bool, 'k) t * (bool, 'k) t ) option =
   let exprs = match conjunction with
     | And xs -> xs
     | e -> [e]
   in
-
   let rec aux acc = function
     | [] -> None
     | x :: xs ->
@@ -393,7 +466,7 @@ let branch
         | split :: ss ->
           match split x with
           | Some (left, right) ->
-            Some (left :: rest, right :: rest)
+            Some (and_ (left :: rest), and_ (right :: rest))
           | None ->
             try_splitters ss
       in
@@ -487,65 +560,70 @@ module Make_solver (X : SOLVABLE) = struct
 
       This is basically a dumbed down version of the DPLL algorithm.
   *)
-  let rec solve (exprs : (bool, 'k) t list) : 'k Solution.t =
-    let formula = and_ exprs in
-    match formula with
-    | Const_bool false -> Solution.Unsat
-    | Const_bool true -> Solution.Sat Model.empty
-    | _ ->
-      match branch X.splits formula with
-      | Some (left, right) ->
-        begin match solve left with
-          | Solution.Sat _ as sat -> sat
-          | Solution.Unsat
-          | Solution.Unknown -> solve right
-          end
-      | None ->
-        let formula_keys = extract_all_keys formula in
-
-        let solution =
-          List.fold_until
-            X.logics
-            ~init:(formula_keys, Model.empty)
-            ~f:(fun (remaining_keys, merged_model) (module Logic) ->
-              match Logic.check formula with
-              | Unsat ->
-                Stop Solution.Unsat
-
-              | Sat model ->
-                let remaining_keys =
-                  List.filter remaining_keys ~f:(fun k ->
-                    not (List.mem model.keys k ~equal:Int.equal))
-                in
-                let merged_model =
-                  Model.merge merged_model model
-                in
-                Continue (remaining_keys, merged_model)
-
-              | Unknown ->
-                Continue (remaining_keys, merged_model)
-            )
-            ~finish:(fun (remaining_keys, merged_model) ->
-              if List.is_empty remaining_keys then
-                Solution.Sat merged_model
-              else
-                Solution.Unknown
-            )
-        in
-        match solution with
-        | Solution.Unknown ->
-          is_backend_used := true;
-          let result = X.solve [M.transform formula] in
-          begin match result with
-            | Solution.Sat model ->
-              Solution.Sat
-                { value = model.value
-                  ; keys = extract_all_keys formula
-                }
-            | _ -> result
+  let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
+    let rec solve_formula (formula : (bool, 'k) t) : 'k Solution.t = 
+      match formula with
+      | Const_bool false -> Solution.Unsat
+      | Const_bool true -> Solution.Sat Model.empty
+      | _ ->
+        match branch X.splits formula with
+        | Some (left, right) ->
+          begin match solve_formula left with
+            | Solution.Sat _ as sat -> sat
+            | Solution.Unsat
+            | Solution.Unknown -> solve_formula right
             end
+        | None ->
+          let formula_keys = extract_all_keys formula in
 
-        | _ ->
-          solution
+          let solution =
+            List.fold_until
+              X.logics
+              ~init:(formula_keys, Model.empty)
+              ~f:(fun (remaining_keys, merged_model) (module Logic) ->
+                match Logic.check formula with
+                | Unsat ->
+                  Stop Solution.Unsat
+
+                | Sat model ->
+                  let remaining_keys =
+                    List.filter remaining_keys ~f:(fun k ->
+                      not (List.mem model.keys k ~equal:Int.equal))
+                  in
+                  let merged_model =
+                    Model.merge merged_model model
+                  in
+                  Continue (remaining_keys, merged_model)
+
+                | Unknown ->
+                  Continue (remaining_keys, merged_model)
+              )
+              ~finish:(fun (remaining_keys, merged_model) ->
+                if List.is_empty remaining_keys then
+                  Solution.Sat merged_model
+                else
+                  Solution.Unknown
+              )
+          in
+          match solution with
+          | Solution.Unknown ->
+            is_backend_used := true;
+            let result = X.solve [M.transform formula] in
+            begin match result with
+              | Solution.Sat model ->
+                Solution.Sat
+                  { value = model.value
+                    ; keys = extract_all_keys formula
+                  }
+              | _ -> result
+              end
+
+          | _ ->
+            solution
+    in
+    exprs
+    |> and_
+    |> rewrite
+    |> solve_formula
 end
 

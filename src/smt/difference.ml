@@ -36,78 +36,6 @@ type atom = {
   c : int;
 }
 
-let rec linearize : type k.
-  (int, k) Formula.t -> (int * int) option =
-  function
-  | Key (I x) ->
-    Some (x, 0)
-
-  | Binop (Plus, t, Const_int c) ->
-    Option.map (linearize t) ~f:(fun (x, k) ->
-      (x, k + c)
-    )
-
-  | Binop (Plus, Const_int c, t) ->
-    Option.map (linearize t) ~f:(fun (x, k) ->
-      (x, k + c)
-    )
-
-  | Binop (Minus, t, Const_int c) ->
-    Option.map (linearize t) ~f:(fun (x, k) ->
-      (x, k - c)
-    )
-
-  | _ ->
-    None
-
-let rec rewrite_int : type k.
-  (int, k) Formula.t -> (int, k) Formula.t =
-  function
-  | Binop (Plus, a, b) ->
-    Binop (Plus, rewrite_int a, rewrite_int b)
-
-  | Binop (Minus, a, b) ->
-    Binop (Minus, rewrite_int a, rewrite_int b)
-
-  | t ->
-    t
-
-let rec rewrite : type k.
-  (bool, k) Formula.t -> (bool, k) Formula.t =
-  function
-  | Binop (Less_than_eq, Const_int c1, rhs) ->
-    rewrite (Binop (Greater_than_eq, rhs, Const_int c1))
-  | Binop (Less_than, Const_int c1, rhs) ->
-    rewrite (Binop (Greater_than, rhs, Const_int c1))
-  | Binop (Greater_than_eq, Const_int c1, rhs) ->
-    rewrite (Binop (Less_than_eq, rhs, Const_int c1))
-  | Binop (Greater_than, Const_int c1, rhs) ->
-    rewrite (Binop (Less_than, rhs, Const_int c1))
-
-  | Not (Binop (Less_than, a, b)) ->
-    rewrite (Binop (Greater_than_eq, a, b))
-  | Not (Binop (Less_than_eq, a, b)) ->
-    rewrite (Binop (Greater_than, a, b))
-  | Not (Binop (Greater_than, a, b)) ->
-    rewrite (Binop (Less_than_eq, a, b))
-  | Not (Binop (Greater_than_eq, a, b)) ->
-    rewrite (Binop (Less_than, a, b))
-  | Binop ((Less_than | Less_than_eq
-    | Greater_than | Greater_than_eq) as op,
-    lhs,
-    Const_int c2) ->
-    let lhs = rewrite_int lhs in
-    begin
-      match linearize lhs with
-      | Some (x, k') ->
-        Binop (op,
-          Key (I x),
-          Const_int (c2 - k'))
-      | None ->
-        Binop (op, lhs, Const_int c2)
-      end
-  | And xs -> And (List.map xs ~f:rewrite)
-  | f -> f
 
 (** Transforms FORMULA into atoms if FORMULA is an And {!Formula.t}.
     Otherwise, it returns an empty list.
@@ -392,7 +320,6 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
     Solution.Unknown
   else
     formula
-    |> rewrite
     |> extract
     |> fun (atoms, check_exprs) -> normalize atoms
     |> fun (vertices, edges, key_to_index) ->

@@ -109,7 +109,14 @@ module Make_of_context (C : CONTEXT) : Formula.SOLVABLE = struct
             | I _ -> a_of_expr model (symbol s) unbox_int_expr
             | B _ -> a_of_expr model (symbol s) unbox_bool_expr
           in
-          Solution.Sat { value; keys = [] }
+          let keys = 
+            List.map (Z3.Model.get_const_decls model) ~f:(fun decl ->
+              decl
+              |> Z3.FuncDecl.get_name
+              |> Z3.Symbol.get_int
+            )
+          in
+          Solution.Sat { value; keys }
         | UNKNOWN -> Unknown
         | UNSATISFIABLE -> Unsat
       in
