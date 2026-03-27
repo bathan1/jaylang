@@ -344,19 +344,6 @@ let rec eval_int (f : (int, 'k) t) : int =
   | _ ->
       failwith "Expected fully substituted integer expression!"
 
-let rec checks_out : type a k. (a, k) t -> a =
-  function
-  | Const_int i -> i
-  | Const_bool b -> b
-  | Binop (op, l, r) ->
-      let f = Binop.to_arithmetic op in
-      f (checks_out l) (checks_out r)
-  | And ls ->
-      List.for_all ls ~f:checks_out
-  | Not x ->
-      not (checks_out x)
-  | f ->
-      failwith ("can't evaluate whether that formula checks out: " ^ (to_string f))
 
 let rec rewrite_int : type k.
   (int, k) t -> (int, k) t =
@@ -414,14 +401,33 @@ let append_neq x val_neq bounds_state =
     List.Assoc.find bounds_state x ~equal:Int.equal
     |> Option.value ~default:{ lower = None; upper = None; nots = [] }
   in
-  let appended =
-    { existing with
-      nots =
-        if List.mem existing.nots val_neq ~equal:Int.equal
-        then existing.nots
-        else val_neq :: existing.nots
-    }
+
+  let within_bounds =
+    let lower_ok =
+      match existing.lower with
+      | None -> true
+      | Some l -> val_neq >= l
+    in
+    let upper_ok =
+      match existing.upper with
+      | None -> true
+      | Some u -> val_neq <= u
+    in
+    lower_ok && upper_ok
   in
+
+  let appended =
+    if not within_bounds then
+      existing
+    else
+      { existing with
+        nots =
+          if List.mem existing.nots val_neq ~equal:Int.equal
+          then existing.nots
+          else val_neq :: existing.nots
+      }
+  in
+
   (x, appended)
   :: List.Assoc.remove bounds_state x ~equal:Int.equal
 
@@ -461,12 +467,21 @@ let rebuild bounds_state rest =
   |> List.concat_map ~f:(fun (x, b) ->
        constraints_for_var x b)
   |> function
-     | [] -> Const_bool true
+     | [] -> And (rest)
      | [f] -> And (f :: rest) 
      | xs -> And (xs @ rest)
 
+let count_neqs : type k. (bool, k) t -> int = fun formula ->
+  let rec count (acc : int) (formula : (bool, k) t) =
+    match formula with
+    | Not (Binop (Equal, _, _)) | Binop (Not_equal, _, _) -> acc + 1
+    | And formulas -> List.fold formulas ~init:acc ~f:count
+    | _ -> acc
+  in
+  count 0 formula
+
 let rewrite : type k.
-  (bool, k) t -> (bool, k) t = fun formula ->
+  (bool, k) t -> (bool, k) t * int = fun formula ->
   let rest_formulas : (bool, k) t list = [] in
   let rec loop_over 
     (bounds_state : (int * int_bound) list) 
@@ -572,8 +587,11 @@ let rewrite : type k.
   let bounds_state, rest = loop_over [] rest_formulas formula
   in
   match List.find bounds_state ~f:(fun (_, bound) -> is_unsat bound || violates_nots bound) with
-  | Some _ -> Const_bool false
-  | None -> rebuild bounds_state rest
+  | Some _ -> Const_bool false, 0
+  | None -> (
+      rebuild bounds_state rest
+      |> fun rewritten -> (rewritten, (count_neqs rewritten))
+    )
 
 module Make_transformer (X : S) = struct
   let rec transform : type a. (a, 'k) t -> (a, 'k) X.t = fun e ->
@@ -680,6 +698,8 @@ let rec substitute :
 (*     Out_channel.flush oc *)
 (*   ) *)
 
+let cTHRESHOLD_NEQ = 4
+
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
 
@@ -749,25 +769,28 @@ module Make_solver (X : SOLVABLE) = struct
                   Solution.Unknown
               )
           in
-          match solution with
-          | Solution.Unknown ->
-            is_backend_used := true;
-            let result = X.solve [M.transform formula] in
-            begin match result with
-              | Solution.Sat model ->
-                Solution.Sat
-                  { value = model.value
-                    ; keys = extract_all_keys formula
-                  }
-              | _ -> result
-              end
-
-          | _ ->
-            solution
+          solution
     in
     exprs
     |> and_
     |> rewrite
-    |> solve_formula
+    |> fun (formula, num_neqs) -> (
+      match num_neqs with
+      | x when x < cTHRESHOLD_NEQ -> solve_formula formula
+      | _ -> Solution.Unknown
+    )
+    |> function
+      | Solution.Unknown -> 
+        is_backend_used := true;
+        let result = X.solve [M.transform formula] in
+        begin match result with
+          | Solution.Sat model ->
+            Solution.Sat
+              { value = model.value
+                ; keys = extract_all_keys formula
+              }
+          | _ -> result
+          end
+      | solution -> solution
 end
 

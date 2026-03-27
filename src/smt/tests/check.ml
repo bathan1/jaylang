@@ -17,6 +17,20 @@ let result_tag = function
   | Solution.Unsat -> "UNSAT"
   | Solution.Unknown -> "UNKNOWN"
 
+let rec checks_out : type a k. (a, k) Formula.t -> a =
+  function
+  | Formula.Const_int i -> i
+  | Const_bool b -> b
+  | Binop (op, l, r) ->
+      let f = Binop.to_arithmetic op in
+      f (checks_out l) (checks_out r)
+  | And ls ->
+      List.for_all ls ~f:checks_out
+  | Not x ->
+      not (checks_out x)
+  | f ->
+      failwith ("can't evaluate whether that formula checks out: " ^ (Formula.to_string f))
+
 let () =
   let mismatches = ref [] in
 
@@ -30,7 +44,21 @@ let () =
     let tag1 = result_tag r1 in
     let tag2 = result_tag r2 in
 
-    if not (String.equal tag1 tag2) then
+    let is_bad =
+      match r1, r2 with
+      | Solution.Sat sol1, Solution.Sat _ ->
+        let evaluated =
+          try
+            Formula.substitute formula sol1
+            |> checks_out
+          with _ -> false
+        in
+        not evaluated
+
+      | _ -> not (String.equal tag1 tag2)
+    in
+
+    if is_bad then
       mismatches := {
         index = i;
         formula_text;
@@ -40,16 +68,16 @@ let () =
   );
 
   (match !mismatches with
-    | [] -> sprintf "√ Blue3 checks out! (%d formulas) \n" (List.length ls)
+    | [] -> sprintf "✓ Blue3 checks out! (%d formulas)\n" (List.length ls)
     | ls ->  
       ls
       |> List.rev
       |> List.fold ~init:"" ~f:(fun acc m ->
         sprintf "%s\n[%d]\nFormula:%s\nBlue3: %s\nZ3: %s\n" 
-        acc
-        m.index
-        m.formula_text
-        m.blue3
-        m.z3
+          acc
+          m.index
+          m.formula_text
+          m.blue3
+          m.z3
       ))
   |> printf "%s"

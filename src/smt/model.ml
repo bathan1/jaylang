@@ -131,6 +131,29 @@ let to_string
           in
           Printf.sprintf "{%s%s%s}" sep body sep
 
+let json
+    (type a k)
+    (model : k t)
+    ~(symbol : int -> (a, k) Symbol.t)
+    ~(key_of_symbol : (a, k) Symbol.t -> string)
+    ~(value_to_json : a -> string)
+  : string
+=
+  let assignments =
+    model.keys
+    |> List.filter_map ~f:(fun sym_id ->
+      let sym = symbol sym_id in
+      match model.value sym with
+      | Some v ->
+          let key = key_of_symbol sym in
+          Some (Printf.sprintf "\"%s\": %s" key (value_to_json v))
+      | None -> None
+    )
+  in
+  match assignments with
+  | [] -> "{}"
+  | xs -> Printf.sprintf "{%s}" (String.concat ~sep:", " xs)
+
 (** Fold KEYS over their value from MODEL by calling [F INIT var data].
 
     {3 Fold over a trivial static model}

@@ -321,7 +321,7 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
   else
     formula
     |> extract
-    |> fun (atoms, check_exprs) -> normalize atoms
+    |> fun (atoms, _check_exprs) -> normalize atoms
     |> fun (vertices, edges, key_to_index) ->
     match bellman_ford vertices edges ~src:0 with
     | `Negative_cycle _ -> Solution.Unsat
@@ -340,12 +340,6 @@ let check (formula : (bool, 'k) Formula.t) : 'k Solution.t =
               Some (-1 * (dist.(i) - offset))
           )
       in
-      Formula.substitute (And check_exprs) model
-      |> Formula.checks_out
-      |> function
-        | true ->
-        Solution.Sat model
-        | false -> 
-        Solution.Unknown
+      Solution.Sat model
 ;;
 
