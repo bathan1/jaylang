@@ -1,5 +1,6 @@
 open Core
 open Smt
+open Smt.Symbol
 open Overlays
 
 module Solver_blue3 = Formula.Make_solver (Blue3)
@@ -29,7 +30,7 @@ let rec checks_out : type a k. (a, k) Formula.t -> a =
   | Not x ->
       not (checks_out x)
   | f ->
-      failwith ("can't evaluate whether that formula checks out: " ^ (Formula.to_string f))
+      failwith ("can't evaluate whether that formula checks out: " ^ (Formula.to_string f ~uid_to_string:AsciiSymbol.uid_to_string))
 
 let () =
   let mismatches = ref [] in

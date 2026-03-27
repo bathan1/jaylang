@@ -4,6 +4,7 @@ module type KEY = sig
   type t
 
   val uid : t -> int
+  val uid_to_string : int -> string
 end
 
 module X = Utils.Separate.Make_with_compare (Int)
@@ -23,6 +24,8 @@ module Make (Key : KEY) = struct
 
   let make_int (k : Key.t) : int t = T.make_int k Key.uid
   let make_bool (k : Key.t) : bool t = T.make_bool k Key.uid
+
+  let uid_to_string = Key.uid_to_string
 end
 
 (** [Symbol] instance that maps [char] to [t].
@@ -34,5 +37,11 @@ end
 *)
 module AsciiSymbol = Make (struct
   type t = char
-  let uid = Stdlib.Char.code
+
+  let uid : t -> int = Stdlib.Char.code
+
+  let uid_to_string (uid : int) : string =
+    uid
+    |> Stdlib.Char.chr
+    |> Stdlib.Printf.sprintf "%c"
 end)

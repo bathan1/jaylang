@@ -467,6 +467,7 @@ let count_neqs : type k. (bool, k) t -> int = fun formula ->
   in
   count 0 formula
 
+(** *)
 let rewrite : type k.
   (bool, k) t -> (bool, k) t * int = fun formula ->
   let rest_formulas : (bool, k) t list = [] in
@@ -594,9 +595,9 @@ end
 type 'k solver = (bool, 'k) t list -> 'k Solution.t
 
 
-(** Branch CONJUNCTION into equivalent left and right expressions
-    if that transformation is encoded by a function in SPLITS.
-*)
+(** [branch splits conjunction] separates CONJUNCTION 
+    into equivalent left and right expressions if 
+    that transformation is encoded by a function from SPLITS. *)
 let branch
     (splits : 'k split_fn list)
     (conjunction : (bool, 'k) t)
@@ -635,6 +636,7 @@ let extract_all_keys : type a k. (a, k) t -> int list =
   aux
 ;;
 
+(** [substitute formula model] is FORMULA with assignments from MODEL written in. *)
 let rec substitute :
   type a k.
   (a, k) t -> k Model.t -> (a, k) t =
@@ -685,7 +687,7 @@ let rec substitute :
 (*     Out_channel.flush oc *)
 (*   ) *)
 
-let cTHRESHOLD_NEQ = 4
+let cTHRESHOLD_NEQ = 8
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
@@ -761,23 +763,33 @@ module Make_solver (X : SOLVABLE) = struct
     exprs
     |> and_
     |> rewrite
-    |> fun (formula, num_neqs) -> (
+    |> fun (formula_rewritten, num_neqs) -> (
       match num_neqs with
-      | x when x < cTHRESHOLD_NEQ -> solve_formula formula
+      | x when x < cTHRESHOLD_NEQ -> solve_formula formula_rewritten
       | _ -> Solution.Unknown
     )
     |> function
       | Solution.Unknown -> 
         is_backend_used := true;
-        let result = X.solve [M.transform formula] in
+        let result = X.solve [M.transform formula_rewritten] in
         begin match result with
           | Solution.Sat model ->
             Solution.Sat
               { value = model.value
-                ; keys = extract_all_keys formula
+                ; keys = extract_all_keys formula_rewritten
               }
           | _ -> result
           end
       | solution -> solution
+end
+
+module Make_solver_raw (X : SOLVABLE) = struct
+  module M = Make_transformer (X)
+
+  let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
+    match and_ exprs with
+    | Const_bool false -> Unsat
+    | Const_bool true -> Sat Model.empty
+    | e -> X.solve [ M.transform e ]
 end
 

@@ -5,7 +5,8 @@ open Overlays
 open Utils
 
 let columns = [
-  ["formula_id"; "INTEGER"; "PRIMARY KEY"];
+  ["formula_id"; "INTEGER"; "NOT NULL"];
+  ["neq_threshold"; "INTEGER"; "NOT NULL"];
   ["time_us_blue3"; "FLOAT"; "NOT NULL"];
   ["time_us_z3"; "FLOAT"; "NOT NULL"];
   ["is_backend_used"; "TEXT"; "NOT NULL"];
@@ -16,14 +17,14 @@ let columns = [
 ]
 
 module Solver_blue3 = Formula.Make_solver (Blue3)
-module Solver_z3 = Formula.Make_solver (Typed_z3)
+module Solver_z3 = Formula.Make_solver_raw (Typed_z3)
 
 let sql_create_table =
   let column_stmts = columns
     |> List.map ~f:(String.concat ~sep:" ")
     |> String.concat ~sep:","
   in
-  sprintf "CREATE TABLE IF NOT EXISTS comparisons (%s);" column_stmts
+  sprintf "CREATE TABLE IF NOT EXISTS comparisons (%s, PRIMARY KEY (formula_id, neq_threshold));" column_stmts
 
 let bool_to_sql b = if b then "true" else "false"
 
@@ -35,7 +36,7 @@ let escape_sql s =
 let () =
   let n_trials =
     match Sys.get_argv () with
-    | [| _; n |] -> Int64.of_string n
+    | [| _; n; |] -> Int64.of_string n
     | _ ->
       eprintf "Usage: dune exec ./compare_z3.exe -- <n_trials> < formulas.txt\n";
       exit 1
@@ -117,8 +118,30 @@ let () =
     in
 
   eprintf
-    "INSERT INTO comparisons VALUES (%d, %f, %f, '%s', '%s', '%s', '%s', '%s');\n"
-    i
+    {|INSERT INTO comparisons (
+        formula_id,
+        neq_threshold,
+        time_us_blue3,
+        time_us_z3,
+        is_backend_used,
+        is_sat,
+        formula_text_input,
+        formula_text_rewritten,
+        solution_text
+      ) VALUES (
+        %d, 
+        %d,
+        %f, 
+        %f, 
+        '%s', 
+        '%s', 
+        '%s',
+        '%s',
+        '%s'
+      );
+    |}
+    (i + 1)
+    Formula.cTHRESHOLD_NEQ
     time_us_blue3
     time_us_z3
     (bool_to_sql is_backend_used)
