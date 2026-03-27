@@ -44,7 +44,11 @@ let () =
     List.mapi formulae ~f:(fun idx input ->
       try
         let ast = Boolean.parse input in
-        let formula_text = Formula.to_string ast in
+        let formula_text = Formula.to_string ast ~uid_to_string:(fun uid ->
+          uid
+          |> Char.of_int_exn
+          |> Char.to_string
+        ) in
         Ok (idx, input, ast, formula_text)
       with
         | exn ->

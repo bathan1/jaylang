@@ -51,7 +51,13 @@ let () =
     let rewritten_formula =
       formula
       |> Formula.rewrite
-      |> fun (rewritten, _) -> Formula.to_string rewritten
+      |> fun (rewritten, _) -> Formula.to_string rewritten ~uid_to_string:(
+          function
+          | uid -> 
+            uid
+            |> Char.of_int_exn
+            |> Char.to_string
+        )
     in
     let escaped_rewritten = escape_sql rewritten_formula in
 

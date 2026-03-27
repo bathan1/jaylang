@@ -167,29 +167,16 @@ module type SOLVABLE = sig
   val solve : (bool, 'k) t list -> 'k Solution.t
 end
 
-let to_string (type a) (x : (a, 'k) t) : string =
-  let a = ref 'a' in
-  let next_c () =
-    let c = !a in
-    let next = Char.of_int_exn @@ Char.to_int c + 1 in
-    a := next;
-    c
-  in
-  let env = Hashtbl.create (module Int) in
+let to_string (type a) ~(uid_to_string : int -> string) (x : (a, 'k) t) : string =
   let rec to_string : type a. (a, 'k) t -> string = function
     | Const_int i -> string_of_int i
     | Const_bool b -> string_of_bool b
-    | Key I k
-      | Key B k -> begin
-        match Hashtbl.find env k with
-        | Some c -> String.of_char c
-        | None -> let c = next_c () in Hashtbl.set env ~key:k ~data:c; String.of_char c
-        end
+    | Key I k | Key B k -> uid_to_string k
     | Not e -> Format.sprintf "(not %s)" (to_string e)
-    | And e_ls -> List.fold e_ls ~init:"" ~f:(fun acc e -> 
-      if String.is_empty acc then to_string e else acc ^ " ^ " ^ to_string e
-    )
-    | Binop (bop, e1, e2) -> 
+    | And e_ls -> List.fold e_ls ~init:"" ~f:(fun acc e ->
+        if String.is_empty acc then to_string e else acc ^ " ^ " ^ to_string e
+      )
+    | Binop (bop, e1, e2) ->
       Format.sprintf "(%s %s %s)" (to_string @@ Obj.magic e1) (Binop.to_string bop) (to_string @@ Obj.magic e2)
   in
   to_string x

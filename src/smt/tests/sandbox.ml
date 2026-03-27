@@ -9,7 +9,7 @@ open Overlays
 
 module B3 = Formula.Make_solver (Blue3)
 
-let formula = Boolean.parse "(not ((a % 2) = 0))"
+let formula = Boolean.parse "(a <= c)"
 
 let pp_solution = Solution.to_string 
   ~pp_assignment:(fun (I x) v -> sprintf "%c => %d" (Char.chr x) v)
@@ -17,7 +17,8 @@ let pp_solution = Solution.to_string
 
 let () =
   printf "%s\n" (
-    [formula]
-    |> B3.solve
-    |> pp_solution
+    formula
+    (* |> Formula.rewrite *)
+    (* |> fun (formula, _neq_count) -> formula *)
+    |> Formula.to_string
   )
