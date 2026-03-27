@@ -21,7 +21,7 @@ let () =
   let mismatches = ref [] in
 
   Boolean.from_stdin ()
-  |> List.iteri ~f:(fun i formula_text -> 
+  |> fun ls -> List.iteri ls ~f:(fun i formula_text -> 
     let formula = Boolean.parse formula_text in
 
     let r1 = Solver_blue3.solve [formula] in
@@ -40,7 +40,7 @@ let () =
   );
 
   (match !mismatches with
-    | [] -> "√ Blue3 checks out!\n"
+    | [] -> sprintf "√ Blue3 checks out! (%d formulas) \n" (List.length ls)
     | ls ->  
       ls
       |> List.rev

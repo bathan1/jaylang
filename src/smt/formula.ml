@@ -394,43 +394,186 @@ let rec linearize : type k.
   | _ ->
     None
 
-let rec rewrite : type k.
-  (bool, k) t -> (bool, k) t =
-  function
-  | Binop (Less_than_eq, Const_int c1, rhs) ->
-    rewrite (Binop (Greater_than_eq, rhs, Const_int c1))
-  | Binop (Less_than, Const_int c1, rhs) ->
-    rewrite (Binop (Greater_than, rhs, Const_int c1))
-  | Binop (Greater_than_eq, Const_int c1, rhs) ->
-    rewrite (Binop (Less_than_eq, rhs, Const_int c1))
-  | Binop (Greater_than, Const_int c1, rhs) ->
-    rewrite (Binop (Less_than, rhs, Const_int c1))
+type int_bound = {
+  lower : int option;
+  upper : int option;
+  nots : int list;
+}
 
-  | Not (Binop (Less_than, a, b)) ->
-    rewrite (Binop (Greater_than_eq, a, b))
-  | Not (Binop (Less_than_eq, a, b)) ->
-    rewrite (Binop (Greater_than, a, b))
-  | Not (Binop (Greater_than, a, b)) ->
-    rewrite (Binop (Less_than_eq, a, b))
-  | Not (Binop (Greater_than_eq, a, b)) ->
-    rewrite (Binop (Less_than, a, b))
-  | Binop ((Less_than | Less_than_eq
-    | Greater_than | Greater_than_eq) as op,
-    lhs,
-    Const_int c2) ->
-    let lhs = rewrite_int lhs in
-    begin
-      match linearize lhs with
-      | Some (x, k') ->
-        Binop (op,
-          Key (I x),
-          Const_int (c2 - k'))
-      | None ->
-        Binop (op, lhs, Const_int c2)
-      end
-  | And xs -> And (List.map xs ~f:rewrite)
-  | f -> f
+let update_bounds x f bounds_state =
+  let existing =
+    List.Assoc.find bounds_state x ~equal:Int.equal
+    |> Option.value ~default:{ lower=None; upper=None; nots=[] }
+  in
+  let updated = f existing in
+  (x, updated)
+  :: List.Assoc.remove bounds_state x ~equal:Int.equal
 
+let append_neq x val_neq bounds_state =
+  let existing =
+    List.Assoc.find bounds_state x ~equal:Int.equal
+    |> Option.value ~default:{ lower = None; upper = None; nots = [] }
+  in
+  let appended =
+    { existing with
+      nots =
+        if List.mem existing.nots val_neq ~equal:Int.equal
+        then existing.nots
+        else val_neq :: existing.nots
+    }
+  in
+  (x, appended)
+  :: List.Assoc.remove bounds_state x ~equal:Int.equal
+
+let is_unsat { lower; upper; _ } =
+  match lower, upper with
+  | Some l, Some u -> l > u
+  | _ -> false
+
+let violates_nots { lower; upper; nots } =
+  match lower, upper with
+  | Some l, Some u when l = u ->
+      List.mem nots l ~equal:Int.equal
+  | _ -> false
+
+let constraints_for_var x { lower; upper; nots } =
+  let base =
+    []
+    |> (fun acc ->
+      match lower with
+      | Some l -> Binop (Greater_than_eq, Key (I x), Const_int l) :: acc
+      | None -> acc)
+    |> (fun acc ->
+      match upper with
+      | Some u -> Binop (Less_than_eq, Key (I x), Const_int u) :: acc
+      | None -> acc)
+  in
+
+  let nots =
+    List.map nots ~f:(fun n ->
+      Not (Binop (Equal, Key (I x), Const_int n)))
+  in
+
+  base @ nots
+
+let rebuild bounds_state rest =
+  bounds_state
+  |> List.concat_map ~f:(fun (x, b) ->
+       constraints_for_var x b)
+  |> function
+     | [] -> Const_bool true
+     | [f] -> And (f :: rest) 
+     | xs -> And (xs @ rest)
+
+let rewrite : type k.
+  (bool, k) t -> (bool, k) t = fun formula ->
+  let rest_formulas : (bool, k) t list = [] in
+  let rec loop_over 
+    (bounds_state : (int * int_bound) list) 
+    (rest : (bool, k) t list)
+    =
+    function
+    | Not (Binop (Equal, Const_int c, Key (I x)))
+    | Not (Binop (Equal, Key (I x), Const_int c))
+    | Binop (Not_equal, Const_int c, Key (I x))
+    | Binop (Not_equal, Key (I x), Const_int c) -> (
+        (append_neq x c bounds_state, rest)
+      )
+    | Binop (Less_than_eq, Const_int c1, rhs) -> 
+      loop_over bounds_state rest (Binop (Greater_than_eq, rhs, Const_int c1))
+    | Binop (Less_than, Const_int c1, rhs) ->
+      loop_over bounds_state rest (Binop (Greater_than, rhs, Const_int c1))
+    | Binop (Greater_than_eq, Const_int c1, rhs) ->
+      loop_over bounds_state rest (Binop (Less_than_eq, rhs, Const_int c1))
+    | Binop (Greater_than, Const_int c1, rhs) ->
+      loop_over bounds_state rest (Binop (Less_than, rhs, Const_int c1))
+
+    | Not (Binop (Less_than, a, b)) ->
+      loop_over 
+        bounds_state
+        rest
+        (Binop (Greater_than_eq, a, b))
+    | Not (Binop (Less_than_eq, a, b)) ->
+      loop_over bounds_state rest (Binop (Greater_than, a, b))
+    | Not (Binop (Greater_than, a, b)) ->
+      loop_over bounds_state rest (Binop (Less_than_eq, a, b))
+    | Not (Binop (Greater_than_eq, a, b)) ->
+      loop_over bounds_state rest (Binop (Less_than, a, b))
+    | Binop ((Less_than | Less_than_eq
+      | Greater_than | Greater_than_eq) as op,
+      lhs,
+      Const_int c2) -> (
+      let lhs = rewrite_int lhs in
+        match linearize lhs with
+        | Some (x, k') ->
+          let c = c2 - k' in 
+          let bounds_state = (
+            match op with
+            | Less_than_eq -> (
+                update_bounds 
+                  x 
+                  (fun b -> {
+                    b with upper = Some (
+                      match b.upper with
+                      | None -> c
+                      | Some u -> min u c
+                    )
+                  })
+                  bounds_state
+              )
+            | Less_than -> (
+                update_bounds
+                  x
+                  (fun b -> { 
+                    b with upper = Some (
+                      match b.upper with
+                      | None -> c - 1
+                      | Some u -> min u (c - 1)
+                    ) 
+                  })
+                  bounds_state
+              )
+            | Greater_than_eq -> (
+                update_bounds 
+                  x 
+                  (fun b -> {
+                    b with lower = Some (
+                      match b.lower with
+                      | None -> c
+                      | Some l -> max l c
+                    )
+                  })
+                  bounds_state
+              )
+            | Greater_than -> (
+                update_bounds
+                  x
+                  (fun b -> {
+                    b with lower = Some (
+                      match b.lower with
+                      | None -> c + 1
+                      | Some l -> max l (c + 1)
+                    )
+                  })
+                  bounds_state
+              )
+            | _ -> bounds_state
+          ) in (bounds_state, rest)
+        | None ->
+          (* Should never hit... *)
+          (bounds_state, Binop (op, lhs, Const_int c2) :: rest)
+      )
+    | And xs ->
+      List.fold xs ~init:(bounds_state, rest) ~f:(fun (st, rest_acc) f ->
+        loop_over st rest_acc f
+      )
+    | f -> (bounds_state, f :: rest)
+  in
+  let bounds_state, rest = loop_over [] rest_formulas formula
+  in
+  match List.find bounds_state ~f:(fun (_, bound) -> is_unsat bound || violates_nots bound) with
+  | Some _ -> Const_bool false
+  | None -> rebuild bounds_state rest
 
 module Make_transformer (X : S) = struct
   let rec transform : type a. (a, 'k) t -> (a, 'k) X.t = fun e ->
@@ -563,7 +706,8 @@ module Make_solver (X : SOLVABLE) = struct
   let solve (exprs : (bool, 'k) t list) : 'k Solution.t =
     let rec solve_formula (formula : (bool, 'k) t) : 'k Solution.t = 
       match formula with
-      | Const_bool false -> Solution.Unsat
+      | Const_bool false -> 
+        Solution.Unsat
       | Const_bool true -> Solution.Sat Model.empty
       | _ ->
         match branch X.splits formula with
