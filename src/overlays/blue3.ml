@@ -34,7 +34,7 @@ module Make () = (struct
   include Typed_z3.Make ()
 
   let splits = [Splits.neq]
-  let logics : (module Formula.LOGIC) list = [(module Difference)]
+  let logics = [Difference.check]
 end)
 
 module Default = Make ()

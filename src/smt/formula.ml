@@ -47,58 +47,8 @@ type (_, 'k) t =
 *)
 type 'k split_fn = (bool, 'k) t -> ((bool, 'k) t * (bool, 'k) t) option
 
-(** Encapsulates {i subsets} of theories for simple
-    expressions. Based on Logics from {{:https://smt-lib.org/logics-all.shtml} SMT-LIB}.
-    These will generally be {b convex} theories that don't result in a case split.
-    That's what {!split_fn} is for.
-
-    {2 A possibly (definitely) incorrect constant int equality LOGIC}
-
-    Implement the module...
-
-    {[
-    module MyLogic : LOGIC = struct
-      type atom = int * int
-
-      let rec extract (formula : (bool, 'k) Formula.t) : atom list =
-        match formula with
-        | And exprs -> exprs |> List.map ~f:extract |> List.concat
-        | Binop (Equal, Key I x, Const_int c) -> (x, c)
-        | [] -> []
-
-      let solve (atoms : atom list) : 'k Solution.t =
-        let map = Map.of_alist_exn atoms in
-        Solution.Sat (
-          Model.of_local map ~lookup:Map.find
-        )
-    end
-    ]}
-
-    Then we {!extract} and {!solve} on {!Formula.t} formulas:
-
-    {[
-    include Symbol
-
-    let my_formula = Formula.And [
-      Binop (Equal, AsciiSymbol.make_int 'a', Const_int 123456);
-      Binop (Equal, AsciiSymbol.make_int 'b', Const_int 123457)
-    ]
-
-    let atoms = MyLogic.extract my_formula
-
-    let solution = MyLogic.solve atoms
-    ]}
-*)
-module type LOGIC = sig
-  (** Whatever type the logic works with. *)
-  type atom
-
-  (** Returns a LOCAL solution. Used in the {!solve} loop to recursively check
-      if the current Solution state is OK or not; it's NOT used to assign values.
-      That's what {!extend} is for. *)
-  val check : (bool, 'k) t -> 'k Solution.t
-end
-
+(** Specific logic that checks FORMULA for a SOLUTION. *)
+type 'k check_fn = (bool, 'k) t -> 'k Solution.t
 
 (** Adapter type for calling an SMT solver backend.
 
@@ -149,7 +99,7 @@ module type SOLVABLE = sig
       end
       ]}
   *)
-  val logics : (module LOGIC) list
+  val checks : 'k check_fn list
 
   (** Searches for a satisfying model of the {i conjunction} of EXPRS.
 
@@ -442,12 +392,12 @@ let constraints_for_var x { lower; upper; nots } =
       | None -> acc)
   in
 
-  let nots =
+  let nots_formula =
     List.map nots ~f:(fun n ->
       Not (Binop (Equal, Key (I x), Const_int n)))
   in
 
-  base @ nots
+  base @ nots_formula
 
 let rebuild bounds_state rest =
   bounds_state
@@ -592,8 +542,6 @@ module Make_transformer (X : S) = struct
     | Binop (op, e1, e2) -> X.binop op (transform e1) (transform e2)
 end
 
-type 'k solver = (bool, 'k) t list -> 'k Solution.t
-
 
 (** [branch splits conjunction] separates CONJUNCTION 
     into equivalent left and right expressions if 
@@ -680,14 +628,7 @@ let rec substitute :
   | And fs ->
     And (List.map fs ~f:(fun f -> substitute f model))
 
-(* let append_line filename line = *)
-(*   Out_channel.with_file ~append:true filename ~f:(fun oc -> *)
-(*     Out_channel.output_string oc line; *)
-(*     Out_channel.newline oc; *)
-(*     Out_channel.flush oc *)
-(*   ) *)
-
-let cTHRESHOLD_NEQ = 8
+let cTHRESHOLD_NEQ = 6
 
 module Make_solver (X : SOLVABLE) = struct
   module M = Make_transformer (X)
@@ -731,10 +672,10 @@ module Make_solver (X : SOLVABLE) = struct
 
           let solution =
             List.fold_until
-              X.logics
+              X.checks
               ~init:(formula_keys, Model.empty)
-              ~f:(fun (remaining_keys, merged_model) (module Logic) ->
-                match Logic.check formula with
+              ~f:(fun (remaining_keys, merged_model) (check) ->
+                match check formula with
                 | Unsat ->
                   Stop Solution.Unsat
 
